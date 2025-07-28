@@ -1,0 +1,20 @@
+# 忽略所有层级中的 ROS 构建目录
+**/build/
+**/devel/
+**/install/
+**/log/
+.catkin_workspace
+
+# 忽略 IDE 和缓存
+.vscode/
+.cache/
+__pycache__/
+*~
+.DS_Store
+
+# 忽略常见中间文件
+*.pcd
+*.gv
+*.pdf
+*.engine
+
