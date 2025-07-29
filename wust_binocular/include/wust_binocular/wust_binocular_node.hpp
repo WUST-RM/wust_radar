@@ -6,7 +6,7 @@
 #include "wust_utils/ThreadPool.h"
 #include <wust_utils/logger.hpp>
 #include <yaml-cpp/yaml.h>
-using FrameCallback = std::function<void(ImageFrame&)>;
+using FrameCallback = std::function<void(ImageFrame&, bool)>;
 class SingleCamera {
 public:
     SingleCamera(
@@ -15,6 +15,7 @@ public:
         FrameCallback cb,
         bool use_trigger
     ) {
+        this->callback_ = cb;
         use_trigger_ = use_trigger;
         use_video_ = camera_config[key]["video_player"]["use"].as<bool>(false);
         if (use_video_) {
@@ -31,7 +32,7 @@ public:
                 camera_config[key]["video_player"]["high_priority_cpu_priority"].as<int>(0),
                 camera_config[key]["video_player"]["use_sched_fifo"].as<bool>(false)
             );
-            video_player_->setCallback(cb);
+            video_player_->setCallback([this](ImageFrame& frame) { callback_(frame, use_video_); });
             if (use_trigger_) {
                 video_player_->enableTriggerMode(true);
             }
@@ -61,7 +62,7 @@ public:
                 camera_config[key]["high_priority_cpu_priority"].as<int>(0),
                 camera_config[key]["use_sched_fifo"].as<bool>(false)
             );
-            camera_->setFrameCallback(cb);
+            camera_->setFrameCallback([this](ImageFrame& frame) { callback_(frame, use_video_); });
             if (use_trigger_) {
                 camera_->enableTrigger(TriggerType::Software, "Software", 0);
             }
@@ -86,8 +87,6 @@ public:
 
         camera_intrinsic_ = K.clone();
         camera_distortion_ = D.clone();
-
-        this->callback = cb;
     };
     ~SingleCamera() {
         if (use_trigger_) {
@@ -125,7 +124,7 @@ public:
         }
         cv_.notify_one();
     }
-    FrameCallback callback;
+    FrameCallback callback_;
 
 public:
     std::unique_ptr<HikCamera> camera_;

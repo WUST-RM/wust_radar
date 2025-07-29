@@ -36,6 +36,7 @@ struct MovableAtomicBool {
 };
 struct DetectConfig {
     int max_infer_threads;
+    std::string config_path;
 };
 
 class Detect {

@@ -23,7 +23,7 @@ Detect::Detect(const DetectConfig& cfg) {
         std::exit(1);
     }
 
-    std::string config_path = "/home/hy/wust_radar/src/wust_binocular/config/detect_params.yaml";
+    auto config_path = cfg.config_path;
 
     // 使用 yaml-cpp 加载配置文件
     YAML::Node config = YAML::LoadFile(config_path);
@@ -50,7 +50,7 @@ Detect::Detect(const DetectConfig& cfg) {
             "--minBatch 1 "
             "--optBatch 1 "
             "--maxBatch 2 "
-            "--Shape=640x640 "
+            "--Shape=960x960 "
             "--input_name=images"
         );
     } else {
@@ -389,6 +389,7 @@ void Detect::pushInput(const CommonFrame& frame) {
                     }
                     DetectDebug detect_debug;
                     this->detect(frame, infers[i], detect_debug);
+
                     if (debug) {
                         showDebug(detect_debug);
                     }
@@ -396,9 +397,9 @@ void Detect::pushInput(const CommonFrame& frame) {
                     std::cerr << "Error in detect: " << e.what() << std::endl;
                 }
                 infer_status_[i].store(false);
+                detect_finish_count_++;
             });
 
-            detect_finish_count_++;
             return;
         }
     }

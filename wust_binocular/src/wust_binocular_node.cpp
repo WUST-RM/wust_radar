@@ -8,6 +8,8 @@ WustBinocularNode::WustBinocularNode(const rclcpp::NodeOptions& options):
     loadCommonParams();
 
     DetectConfig detect_config;
+    this->declare_parameter<std::string>("detect.config_path", "");
+    this->get_parameter("detect.config_path", detect_config.config_path);
     this->declare_parameter<int>("detect.max_infer_threads", 4);
     this->get_parameter("detect.max_infer_threads", detect_config.max_infer_threads);
     detect_ = std::make_unique<Detect>(detect_config);
@@ -170,9 +172,9 @@ void WustBinocularNode::printStats() {
         if (timer_count_ < fps_ / 10) {
             timer_check_count++;
         }
-        if (timer_check_count > 5) {
-            // stopTimer();
-            // startTimer();
+        if (timer_check_count > 5 && use_trigger_) {
+            stopTimer();
+            startTimer();
             timer_check_count = 0;
         }
         WUST_INFO("printStats") << "tc: " << timer_count_ << " ,pass: " << passed_count_
@@ -187,7 +189,7 @@ void WustBinocularNode::initcamera() {
     this->declare_parameter<std::string>("camera_config_file", "");
     std::string camera_config_file = this->get_parameter("camera_config_file").as_string();
     auto camera_config = YAML::LoadFile(camera_config_file);
-    FrameCallback cb_R = [this](const ImageFrame& f) {
+    FrameCallback cb_R = [this](const ImageFrame& f, bool use_video) {
         if (!is_inited_ || !use_binocular_) {
             return;
         }
@@ -195,7 +197,12 @@ void WustBinocularNode::initcamera() {
             seq_id_R_ = 0;
             seq_reset_R_ = false;
         }
-        cv::Mat img = convertToMatrgb(f);
+        cv::Mat img;
+        if (use_video) {
+            img = convertToMatrgb(f);
+        } else {
+            img = convertToMatbgr(f);
+        }
         FrameUnmatched frame_unmatched = { .seq_id = seq_id_R_++,
                                            .src_img = img,
                                            .timestamp = f.timestamp,
@@ -204,11 +211,16 @@ void WustBinocularNode::initcamera() {
             synchronizer_->pushFrame(frame_unmatched);
         }
     };
-    FrameCallback cb_L = [this](const ImageFrame& f) {
+    FrameCallback cb_L = [this](const ImageFrame& f, bool use_video) {
         if (!is_inited_) {
             return;
         }
-        cv::Mat img = convertToMatrgb(f);
+        cv::Mat img;
+        if (use_video) {
+            img = convertToMatrgb(f);
+        } else {
+            img = convertToMatbgr(f);
+        }
         if (use_binocular_) {
             if (seq_reset_L_) {
                 seq_id_L_ = 0;
@@ -223,10 +235,14 @@ void WustBinocularNode::initcamera() {
             }
         } else {
             CommonFrame frame;
-            cv::Mat img = convertToMatrgb(f);
             frame.image_L = img;
             frame.timestamp_L = f.timestamp;
+            // thread_pool_->enqueue(
+            //             [frame = std::move(frame), this]() {
             this->frameCallback(frame);
+            //      },
+            //     -1
+            // );
         }
     };
     if (use_binocular_) {

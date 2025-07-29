@@ -9,7 +9,8 @@ wust_binocular:
       use_binocular: false
       use_id_match: false
     detect:
-      max_infer_threads: 5
+      max_infer_threads: 4
+      config_path: /home/hy/wust_radar/src/wust_binocular/config/detect_params.yaml
     logger:
       log_level: INFO
       log_path: /home/hy/wust_log
