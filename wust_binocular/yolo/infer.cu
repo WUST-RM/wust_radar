@@ -427,7 +427,7 @@ namespace trt {
 
 
         virtual void print() override {
-            INFO("Infer %p [%s]", this, has_dynamic_dim() ? "DynamicShape" : "StaticShape");
+            //INFO("Infer %p [%s]", this, has_dynamic_dim() ? "DynamicShape" : "StaticShape");
 
             int num_input = 0;
             int num_output = 0;
@@ -444,18 +444,18 @@ namespace trt {
                 }
             }
 
-            INFO("Inputs: %d", num_input);
+            //INFO("Inputs: %d", num_input);
             for (int i = 0; i < num_input; ++i) {
                 const char *name = engine->getIOTensorName(i);
                 auto dim = engine->getTensorShape(name);
-                INFO("\t%d.%s : shape {%s}", i, name, format_shape(dim).c_str());
+                //INFO("\t%d.%s : shape {%s}", i, name, format_shape(dim).c_str());
             }
 
-            INFO("Outputs: %d", num_output);
+            //INFO("Outputs: %d", num_output);
             for (int i = 0; i < num_output; ++i) {
                 const char *name = engine->getIOTensorName(i + num_input);
                 auto dim = engine->getTensorShape(name);
-                INFO("\t%d.%s : shape {%s}", i, name, format_shape(dim).c_str());
+                //INFO("\t%d.%s : shape {%s}", i, name, format_shape(dim).c_str());
             }
         }
     };

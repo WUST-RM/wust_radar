@@ -24,3 +24,10 @@ struct imgframe {
     cv::Mat img;
     std::chrono::steady_clock::time_point timestamp;
 };
+enum class FrameSource { LEFT, RIGHT };
+struct FrameUnmatched {
+    uint64_t seq_id;
+    cv::Mat src_img;
+    std::chrono::steady_clock::time_point timestamp;
+    FrameSource source;
+};

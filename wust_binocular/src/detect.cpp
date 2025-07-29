@@ -5,6 +5,14 @@
 #include <wust_utils/logger.hpp>
 #include <yaml-cpp/yaml.h>
 #define MAX_CARS 12
+Detect::~Detect() {
+    WUST_INFO("detect") << "Detect destructor called.";
+    //infers.clear();
+    if (thread_pool_) {
+        thread_pool_->waitUntilEmpty();
+        thread_pool_.reset();
+    }
+}
 Detect::Detect(const DetectConfig& cfg) {
     max_infer_threads_ = cfg.max_infer_threads;
     std::cout << "Checking CUDA with nvidia-smi...\n";
@@ -88,28 +96,26 @@ Detect::Detect(const DetectConfig& cfg) {
     std::cout << "yolo_path: " << yolo_path << "\n";
     std::cout << "armor_path: " << armor_path << "\n";
     std::cout << "classify_path: " << classify_path << "\n";
+    infers.reserve(max_infer_threads_);
     for (size_t i = 0; i < max_infer_threads_; i++) {
         auto infer = std::make_unique<Inf>();
-
         infer->yolo = yolo::load(yolo_path, yolo::Type::V5, 0.6f, 0.45f);
         infer->armor_yolo = yolo::load(armor_path, yolo::Type::V5, 0.4f, 0.45f);
         infer->classifier = classify::load(classify_path, classify::Type::densenet121);
+        if (!infer->yolo || !infer->armor_yolo || !infer->classifier) {
+            WUST_ERROR("detect_init") << "Load infer failed!"
+                                      << "index:" << i;
+            continue;
+        }
         infers.push_back(std::move(infer));
-        WUST_INFO("detect") << "Load infer success!";
+        WUST_MAIN("detect_init") << "Load infer success!"
+                                 << "index:" << i;
     }
     infer_status_.reserve(max_infer_threads_);
     for (size_t i = 0; i < max_infer_threads_; ++i) {
         infer_status_.emplace_back(false);
     }
 
-    // this->classifier = classify::load(classify_path, classify::Type::densenet121);
-    // WUST_INFO("detect") << "Load classify engine success!";
-
-    // this->armor_yolo = yolo::load(armor_path, yolo::Type::V5, 0.4f, 0.45f);
-    // WUST_INFO("detect") << "Load armor_yolo engine success!";
-
-    // this->yolo = yolo::load(yolo_path, yolo::Type::V5, 0.65f, 0.45f);
-    // WUST_INFO("detect") << "Load yolo engine success!";
     thread_pool_ = std::make_unique<ThreadPool>(std::thread::hardware_concurrency() * 2);
     detect_finish_count_ = 0;
 }
@@ -151,19 +157,43 @@ cv::Rect getSafeRect(const cv::Mat& image, const cv::Rect& rect) {
 
     return cv::Rect(x, y, width, height);
 }
+cv::Mat letterbox(const cv::Mat& img, int target_size = 224) {
+    int w = img.cols, h = img.rows;
+    float scale = std::min(float(target_size) / w, float(target_size) / h);
+    int new_w = int(w * scale), new_h = int(h * scale);
 
-// In Detect.cpp
+    cv::Mat resized;
+    cv::resize(img, resized, cv::Size(new_w, new_h), 0, 0, cv::INTER_LINEAR);
+
+    int top = (target_size - new_h) / 2;
+    int bottom = target_size - new_h - top;
+    int left = (target_size - new_w) / 2;
+    int right = target_size - new_w - left;
+
+    cv::Mat output;
+    cv::copyMakeBorder(
+        resized,
+        output,
+        top,
+        bottom,
+        left,
+        right,
+        cv::BORDER_CONSTANT,
+        cv::Scalar(0, 0, 0)
+    );
+    return output;
+}
+cv::Mat resizeNoPadding(const cv::Mat& img, int target_size = 224) {
+    cv::Mat output;
+    cv::resize(img, output, cv::Size(target_size, target_size), 0, 0, cv::INTER_LINEAR);
+    return output;
+}
 
 void Detect::detect(
     const CommonFrame& frame,
     const std::unique_ptr<Inf>& infer,
     DetectDebug& detect_debug
 ) {
-    if (!infer->yolo || !infer->classifier || !infer->armor_yolo) {
-        WUST_ERROR("detect") << "infer is null";
-        return;
-    }
-
     cv::Mat img = frame.image_L;
 
     if (img.empty()) {
@@ -171,204 +201,192 @@ void Detect::detect(
         return;
     }
     if (debug) {
+        if (!detect_debug.imgframe_)
+            detect_debug.imgframe_.emplace();
         img.convertTo(detect_debug.imgframe_->img, -1, 1, 0);
-        auto now = std::chrono::steady_clock::now();
-        detect_debug.imgframe_->timestamp = now;
+        detect_debug.imgframe_->timestamp = frame.timestamp_L;
+        detect_debug.detect_start.emplace(std::chrono::steady_clock::now());
     }
-    // 1. YOLO 车检测
-    yolo::Image image(img.data, img.cols, img.rows);
-    auto result = infer->yolo->forward(image);
-    if (result.empty()) {
-        WUST_INFO("detect") << "No Car!";
 
+    yolo::Image image(img.data, img.cols, img.rows);
+    if (!infer->yolo) {
+        WUST_ERROR("detect") << "yolo is null";
+        return;
+    }
+    auto result = infer->yolo->forward(image);
+    if (result.size() == 0) {
+        //WUST_INFO("detect") << "No Car!";
         return;
     } else if (result.size() > MAX_CARS) {
-        WUST_INFO("detect") << "Too Many Car!" << result.size();
+        WUST_INFO("detect") << "Too Many Car!" << result.size() << " > " << MAX_CARS;
         return;
     }
 
-    // 2. 筛选出车框并提取 ROI
-    std::vector<Car> cars;
+    std::vector<yolo::Image> images;
     std::vector<cv::Mat> car_imgs;
+    std::vector<Car> cars;
     for (auto& box: result) {
         if (box.class_label == 0 || box.class_label == 1) {
             Car car;
             car.car = box;
-            cv::Rect rect(box.left, box.top, box.right - box.left, box.bottom - box.top);
-            car.car_rect = getSafeRect(img, rect);
-            if (car.car_rect.area() > 0) {
-                car_imgs.push_back(img(car.car_rect).clone());
-                cars.push_back(car);
-            }
+            cars.push_back(car);
         }
     }
 
-    // 3. 装甲板检测
-    std::vector<yolo::Image> armor_batch;
-    for (auto& mat: car_imgs) {
-        armor_batch.emplace_back(mat.data, mat.cols, mat.rows);
+    for (auto& car: cars) {
+        auto temp_rect = cv::Rect(
+            car.car.left,
+            car.car.top,
+            car.car.right - car.car.left,
+            car.car.bottom - car.car.top
+        );
+        cv::Rect temp_car_rect = getSafeRect(img, temp_rect);
+        auto car_img = img(temp_car_rect);
+        car_imgs.push_back(car_img.clone());
+        car.car_rect = temp_car_rect;
     }
-    auto armor_boxes = infer->armor_yolo->forwards(armor_batch);
 
+    if (!infer->armor_yolo) {
+        if (debug) {
+            detect_debug.cars = cars;
+        }
+        WUST_ERROR("detect") << "armor_yolo is null";
+        return;
+    }
+    for (auto& car_img: car_imgs) {
+        auto image = yolo::Image(car_img.data, car_img.cols, car_img.rows);
+        images.push_back(image);
+    }
+
+    auto armor_boxes = infer->armor_yolo->forwards(images);
     bool has_armor = false;
-    for (size_t i = 0; i < armor_boxes.size() && i < cars.size(); ++i) {
-        if (!armor_boxes[i].empty()) {
+    for (int i = 0; i < armor_boxes.size(); i++) {
+        if (armor_boxes[i].size() == 0) {
+            continue;
+        } else {
             cars[i].armors = armor_boxes[i];
             has_armor = true;
         }
     }
     if (!has_armor) {
-        WUST_INFO("detect") << "No Armor!";
+        //WUST_INFO("detect") << "No Armor!";
         if (debug) {
             detect_debug.cars = cars;
         }
         return;
     }
+    if (!infer->classifier) {
+        if (debug) {
+            detect_debug.cars = cars;
+        }
+        WUST_ERROR("detect") << "classifier is null";
+        return;
+    }
 
-    // 4. 装甲分类
-    std::vector<classify::Image> cls_batch;
-    for (size_t i = 0; i < cars.size(); ++i) {
-        for (auto& arm: cars[i].armors) {
-            cv::Rect r_img(
-                arm.left + cars[i].car.left,
-                arm.top + cars[i].car.top,
-                arm.right - arm.left,
-                arm.bottom - arm.top
+    std::vector<cv::Mat> armor_imgs;
+    std::vector<classify::Image> armor_images;
+
+    for (auto& car: cars) {
+        if (car.armors.size() == 0) {
+            continue;
+        }
+        for (auto& armor: car.armors) {
+            cv::Rect rect_img_1(
+                armor.left + car.car.left,
+                armor.top + car.car.top,
+                armor.right - armor.left,
+                armor.bottom - armor.top
             );
-            cv::Rect safe = getSafeRect(img, r_img);
-            if (safe.area() > 0) {
-                cls_batch.emplace_back(img(safe).data, safe.width, safe.height);
-            }
+            cv::Rect rect_img = getSafeRect(img, rect_img_1);
+            auto armor_img = img(rect_img);
+            armor_imgs.push_back(armor_img.clone());
         }
     }
-    auto cls_results = infer->classifier->forwards(cls_batch);
+    for (auto& armor_img: armor_imgs) {
+        auto image = classify::Image(armor_img.data, armor_img.cols, armor_img.rows);
+        armor_images.push_back(image);
+    }
+    auto armor_result = infer->classifier->forwards(armor_images);
 
-    // 5. 将分类结果贴回 cars，并计算每辆车的最终装甲方位、颜色等
-    size_t idx = 0;
     for (auto& car: cars) {
-        for (auto& arm: car.armors) {
-            if (idx < cls_results.size()) {
-                arm.class_label = cls_results[idx++];
+        if (car.armors.size() == 0) {
+            continue;
+        }
+        cv::Rect max_rect;
+        float max_confidence = 0;
+        std::vector<yolo::Box> fallback_armors;
+        for (auto& armor: car.armors) {
+            armor.class_label = armor_result[0];
+            armor_result.erase(armor_result.begin());
+
+            if (armor.class_label != 0) {
+                if (armor.confidence > max_confidence) {
+                    max_rect = cv::Rect(
+                        armor.left + car.car.left,
+                        armor.top + car.car.top,
+                        armor.right - armor.left,
+                        armor.bottom - armor.top
+                    );
+                    max_confidence = armor.confidence;
+                    car.number = armor.class_label;
+                }
+            } else {
+                fallback_armors.push_back(armor);
             }
         }
-        // 选置信度最高的装甲，并计算中心、颜色 etc.
-        float max_conf = 0;
-        cv::Rect best_rect;
-        for (auto& arm: car.armors) {
-            if (arm.confidence > max_conf) {
-                max_conf = arm.confidence;
-                best_rect = cv::Rect(
-                    arm.left + car.car.left,
-                    arm.top + car.car.top,
-                    arm.right - arm.left,
-                    arm.bottom - arm.top
+        if (car.number == 0 && !fallback_armors.empty()) {
+            yolo::Box* best = nullptr;
+            float best_conf = -1.0f;
+            for (auto& armor: fallback_armors) {
+                if (armor.confidence > best_conf) {
+                    best = &armor;
+                    best_conf = armor.confidence;
+                }
+            }
+
+            if (best) {
+                max_rect = cv::Rect(
+                    best->left + car.car.left,
+                    best->top + car.car.top,
+                    best->right - best->left,
+                    best->bottom - best->top
                 );
-                car.number = arm.class_label;
+                max_confidence = best->confidence;
+                car.number = 0;
             }
         }
-        if (max_conf > 0) {
-            cv::Rect safe = getSafeRect(img, best_rect);
-            auto max_mat = img(safe);
-            car.color = getColor(max_mat);
-            car.center = cv::Point2f(
-                best_rect.x + best_rect.width / 2.f,
-                best_rect.y + best_rect.height / 2.f
-            );
+        if (max_confidence == 0) {
+            continue;
         }
+        auto safe_rect = getSafeRect(img, max_rect);
+        auto max_mat = img(safe_rect);
+
+        car.color = getColor(max_mat);
+        car.center =
+            cv::Point2f(max_rect.x + max_rect.width / 2.0f, max_rect.y + max_rect.height / 2.0f);
     }
     if (debug) {
         detect_debug.cars = cars;
     }
 }
 
-void Detect::showDebug(const DetectDebug& detect_debug) {
-    if (detect_debug.imgframe_ && detect_debug.imgframe_->img.empty()) {
-        return;
-    }
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-    std::chrono::duration<double> time_used =
-        std::chrono::duration_cast<std::chrono::duration<double>>(
-            now - detect_debug.imgframe_->timestamp
-        );
-    double time_ms = time_used.count() * 1000;
-    cv::Mat debug_img = detect_debug.imgframe_->img.clone();
-    if (detect_debug.cars) {
-        const auto& cars = *detect_debug.cars;
-        for (auto& car: cars) {
-            cv::Scalar col;
-            switch (car.color) {
-                case 0:
-                    col = { 255, 0, 0 };
-                    break; // blue
-                case 2:
-                    col = { 0, 0, 255 };
-                    break; // red
-                default:
-                    col = { 255, 255, 255 }; // white
-            }
-            cv::rectangle(debug_img, car.car_rect, col, 2);
-            for (auto& arm: car.armors) {
-                cv::Rect r(
-                    arm.left + car.car.left,
-                    arm.top + car.car.top,
-                    arm.right - arm.left,
-                    arm.bottom - arm.top
-                );
-                cv::rectangle(debug_img, r, { 255, 255, 255 }, 1);
-                cv::putText(
-                    debug_img,
-                    std::to_string(arm.class_label),
-                    cv::Point(r.x, r.y),
-                    cv::FONT_HERSHEY_SIMPLEX,
-                    1,
-                    col,
-                    2
-                );
-            }
-            // 绘制置信度
-            cv::putText(
-                debug_img,
-                std::to_string(car.car.confidence),
-                cv::Point(car.car.left, car.car.top),
-                cv::FONT_HERSHEY_SIMPLEX,
-                1,
-                col,
-                2
-            );
-        }
-    }
-
-    // 绘制性能文字
-    std::string text = "Detect Time: " + std::to_string(time_ms) + " ms";
-    cv::Point org(10, 100);
-    cv::putText(debug_img, text, org, cv::FONT_HERSHEY_SIMPLEX, 2.0, { 0, 0, 0 }, 7, cv::LINE_AA);
-    cv::putText(
-        debug_img,
-        text,
-        org,
-        cv::FONT_HERSHEY_SIMPLEX,
-        2.0,
-        { 50, 255, 50 },
-        5,
-        cv::LINE_AA
-    );
-
-    // 显示
-    cv::resizeWindow("detect", 800, 600);
-    cv::namedWindow("detect", cv::WINDOW_NORMAL);
-    cv::imshow("detect", debug_img);
-    int key = cv::waitKey(1);
-    if (key == 'r')
-        debug = !debug;
-}
-
-void Detect::pushInput(CommonFrame& frame) {
+void Detect::pushInput(const CommonFrame& frame) {
     for (size_t i = 0; i < infer_status_.size(); ++i) {
         if (!infer_status_[i].load()) {
             infer_status_[i].store(true);
 
-            thread_pool_->enqueue([this, i, frame = std::move(frame)]() {
+            thread_pool_->enqueue([this, i, frame]() {
                 try {
+                    if (!infers[i]) {
+                        std::cerr << "Fatal: infers[" << i << "] is nullptr\n";
+                        infer_status_[i].store(false);
+                        return;
+                    }
+                    if (!infers[i]->yolo || !infers[i]->armor_yolo || !infers[i]->classifier) {
+                        std::cerr << "Fatal: infers[" << i << "] contains nullptr components\n";
+                        infer_status_[i].store(false);
+                        return;
+                    }
                     DetectDebug detect_debug;
                     this->detect(frame, infers[i], detect_debug);
                     if (debug) {
@@ -377,29 +395,19 @@ void Detect::pushInput(CommonFrame& frame) {
                 } catch (const std::exception& e) {
                     std::cerr << "Error in detect: " << e.what() << std::endl;
                 }
-
                 infer_status_[i].store(false);
             });
+
             detect_finish_count_++;
             return;
         }
     }
-
+    // DetectDebug detect_debug;
+    // this->detect(frame, detect_debug);
+    // if (debug) {
+    //     showDebug(detect_debug);
+    //     detect_debug.reset();
+    // }
+    // detect_finish_count_++;
     //std::cerr << "No free infer slots available. Frame discarded." << std::endl;
-}
-void Detect::detect42mm(const cv::Mat& image) {
-    cv::namedWindow("Binary Image", cv::WINDOW_NORMAL);
-    cv::resizeWindow("Binary Image", 800, 600);
-    // 假设 image 是 CV_8UC3 的 BGR 图像（OpenCV 默认是 BGR，不是 RGB）
-    cv::Mat green_channel;
-
-    // 提取 G 通道 (通道索引为1)
-    cv::extractChannel(image, green_channel, 1);
-
-    cv::Mat binary_img;
-    cv::threshold(green_channel, binary_img, 150, 255, cv::THRESH_BINARY);
-
-    cv::imshow("Binary Image", binary_img);
-    cv::waitKey(1);
-    // 你后续处理就用 binary_img
 }

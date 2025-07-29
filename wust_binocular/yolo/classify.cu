@@ -304,13 +304,6 @@ namespace classify{
 
         auto input_dim = trt_->static_dims(0);
         auto output_dims_ = trt_->static_dims(1);
-        puts("input_dim");
-        for(int i=0;i<4;i++){
-            std::cout<<input_dim[i]<<std::endl;
-        }
-        // puts(input_dim[1]);
-        // puts(input_dim[2]);
-        // puts(input_dim[3]);
         network_input_width_ = input_dim[3];
         network_input_height_ = input_dim[2];
         isdynamic_model_ = trt_->has_dynamic_dim();
@@ -323,11 +316,6 @@ namespace classify{
         std_[2] = 0.225;
         normalize_ = Norm::mean_std(mean_, std_, 1.0 / 255.0, ChannelType::SwapRB);
         num_class_ = output_dims_[1];
-        // std::cout<<"dims:";
-        // std::cout<<output_dims_[0]<<std::endl;
-        // std::cout<<output_dims_[1]<<std::endl;
-        // std::cout<<output_dims_[2]<<std::endl;
-
 
         // if (type == Type::densenet121){
 
