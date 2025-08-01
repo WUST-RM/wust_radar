@@ -3,6 +3,7 @@
 #include "wust_binocular/camera/video_player.hpp"
 #include "wust_binocular/detect.hpp"
 #include "wust_binocular/frame_synchronizer.hpp"
+#include "wust_binocular/stereo_depth_estimator.hpp"
 #include "wust_utils/ThreadPool.h"
 #include <wust_utils/logger.hpp>
 #include <yaml-cpp/yaml.h>
@@ -175,6 +176,11 @@ private:
     void loadCommonParams();
     void frameCallback(const CommonFrame& frame);
     void timerCallback();
+    void detectCallback(
+        const CommonFrame& frame,
+        const std::vector<Car>& cars,
+        DetectDebug& detect_debug
+    );
     void stopTimer();
     void startTimer();
     void printStats();
@@ -205,4 +211,5 @@ private:
     bool seq_reset_R_ = false;
     bool seq_reset_L_ = false;
     std::unique_ptr<FrameSynchronizer> synchronizer_;
+    std::unique_ptr<StereoDepthEstimator> depth_estimator_;
 };

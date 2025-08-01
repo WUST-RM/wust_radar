@@ -452,7 +452,7 @@ void HikCamera::hikCaptureLoop() {
                     if (!restartCamera()) {
                         WUST_ERROR(hik_logger_)
                             << "Failed to restart camera after hardware failure.";
-                        break;
+                        std::exit(EXIT_FAILURE);
                     }
                     fail_start_time = std::chrono::steady_clock::now();
                     in_fail_state = false;

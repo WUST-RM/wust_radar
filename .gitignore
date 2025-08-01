@@ -17,4 +17,7 @@ __pycache__/
 *.gv
 *.pdf
 *.engine
+*.mp4
+*.MP4
+*.avi
 

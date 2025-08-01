@@ -12,7 +12,16 @@ WustBinocularNode::WustBinocularNode(const rclcpp::NodeOptions& options):
     this->get_parameter("detect.config_path", detect_config.config_path);
     this->declare_parameter<int>("detect.max_infer_threads", 4);
     this->get_parameter("detect.max_infer_threads", detect_config.max_infer_threads);
+    this->declare_parameter<double>("detect.min_free_mem_ratio", 0.5);
+    this->get_parameter("detect.min_free_mem_ratio", detect_config.min_free_mem_ratio);
     detect_ = std::make_unique<Detect>(detect_config);
+    detect_->setCallback(std::bind(
+        &WustBinocularNode::detectCallback,
+        this,
+        std::placeholders::_1,
+        std::placeholders::_2,
+        std::placeholders::_3
+    ));
     thread_pool_ = std::make_unique<ThreadPool>(std::thread::hardware_concurrency() * 2);
     initcamera();
     if (use_binocular_) {
@@ -28,6 +37,16 @@ WustBinocularNode::WustBinocularNode(const rclcpp::NodeOptions& options):
                 this->frameCallback(frame);
             };
         synchronizer_->setMatchCallback(match_frame_callback);
+        cv::Mat R = cv::Mat::eye(3, 3, CV_64F); // 单位矩阵，表示无旋转
+        cv::Mat T = (cv::Mat_<double>(3, 1) << 0.06, 0.0, 0.0); // 6cm 平移
+        depth_estimator_ = std::make_unique<StereoDepthEstimator>(
+            camera_L_->camera_intrinsic_,
+            camera_L_->camera_distortion_,
+            camera_R_->camera_intrinsic_,
+            camera_R_->camera_distortion_,
+            R,
+            T
+        );
     }
     if (use_trigger_) {
         startTimer();
@@ -37,6 +56,7 @@ WustBinocularNode::WustBinocularNode(const rclcpp::NodeOptions& options):
     if (camera_R_)
         camera_R_->start();
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
     seq_reset_R_ = true;
     seq_reset_L_ = true;
     is_inited_ = true;
@@ -101,6 +121,56 @@ void WustBinocularNode::frameCallback(const CommonFrame& frame) {
     if (detect_) {
         detect_->pushInput(frame);
     }
+}
+float getAverageCenterDepth(const cv::Mat& depth_map, int window_size = 5) {
+    if (depth_map.empty())
+        return -1.0f;
+
+    int cx = depth_map.cols / 2;
+    int cy = depth_map.rows / 2;
+    int half = window_size / 2;
+
+    cv::Rect roi(cx - half, cy - half, window_size, window_size);
+    roi &= cv::Rect(0, 0, depth_map.cols, depth_map.rows);
+
+    cv::Mat patch = depth_map(roi);
+
+    double sum = 0.0;
+    int count = 0;
+    for (int y = 0; y < patch.rows; ++y) {
+        for (int x = 0; x < patch.cols; ++x) {
+            float val = patch.at<float>(y, x);
+            if (val > 0 && val < 10000) { // 根据你的深度范围调整阈值
+                sum += val;
+                count++;
+            }
+        }
+    }
+
+    if (count == 0)
+        return -1.0f; // 没有有效深度
+
+    return static_cast<float>(sum / count);
+}
+
+void WustBinocularNode::detectCallback(
+    const CommonFrame& frame,
+    const std::vector<Car>& cars,
+    DetectDebug& detect_debug
+) {
+    if (depth_estimator_) {
+        thread_pool_->enqueue(
+            [this, frame, cars]() {
+                for (auto& car: cars) {
+                    auto depth = depth_estimator_->computeDepth(frame, car.car_rect);
+                    auto depth_value = getAverageCenterDepth(depth);
+                    std::cout << depth_value << std::endl;
+                }
+            },
+            -1
+        );
+    }
+    showDebug(detect_debug);
 }
 void WustBinocularNode::timerCallback() {
     if (camera_L_)

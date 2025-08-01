@@ -6,6 +6,8 @@
 #include "wust_utils/ThreadPool.h"
 #include "yolos.hpp"
 #include <memory>
+using DetectCallback =
+    std::function<void(const CommonFrame&, const std::vector<Car>&, DetectDebug&)>;
 struct Inf {
     std::shared_ptr<yolo::Infer> yolo;
     std::shared_ptr<yolo::Infer> armor_yolo;
@@ -37,6 +39,7 @@ struct MovableAtomicBool {
 struct DetectConfig {
     int max_infer_threads;
     std::string config_path;
+    double min_free_mem_ratio;
 };
 
 class Detect {
@@ -45,12 +48,16 @@ public:
     ~Detect();
     void pushInput(const CommonFrame& frame);
     size_t detect_finish_count_;
+    void setCallback(const DetectCallback& cb) {
+        callback_ = cb;
+    }
 
 private:
-    void
+    std::vector<Car>
     detect(const CommonFrame& frame, const std::unique_ptr<Inf>& infer, DetectDebug& detect_debug);
     std::vector<std::unique_ptr<Inf>> infers;
     std::vector<MovableAtomicBool> infer_status_;
+    std::vector<bool> infer_released_;  
     std::string yolo_path;
     std::string armor_path;
     std::string classify_path;
@@ -58,5 +65,7 @@ private:
     std::unique_ptr<ThreadPool> thread_pool_;
     std::atomic<int> next_infer_id_ { 0 };
     int max_infer_threads_;
+    double min_free_mem_ratio_ = 0.5;
     std::atomic<int> infer_running_count_ { 0 };
+    DetectCallback callback_;
 };
