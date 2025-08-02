@@ -8,7 +8,9 @@
 #define MAX_CARS 12
 Detect::~Detect() {
     WUST_INFO("detect") << "Detect destructor called.";
-    //infers.clear();
+    if (resource_pool_) {
+        resource_pool_.reset();
+    }
     if (thread_pool_) {
         thread_pool_->waitUntilEmpty();
         thread_pool_.reset();
@@ -115,44 +117,83 @@ Detect::Detect(const DetectConfig& cfg) {
     std::cout << "yolo_path: " << yolo_path << "\n";
     std::cout << "armor_path: " << armor_path << "\n";
     std::cout << "classify_path: " << classify_path << "\n";
-
-    infers.reserve(max_infer_threads_);
-    for (size_t i = 0; i < max_infer_threads_; i++) {
+    size_t infer_size;
+    AdaptiveResourcePool<Inf>::Params pool_params;
+    pool_params.resource_initializer = [=]() {
+        std::vector<std::unique_ptr<Inf>> infers;
+        infers.reserve(max_infer_threads_);
+        for (size_t i = 0; i < max_infer_threads_; i++) {
+            auto infer = std::make_unique<Inf>();
+            infer->yolo = yolo::load(yolo_path, yolo::Type::V5, 0.6f, 0.45f);
+            infer->armor_yolo = yolo::load(armor_path, yolo::Type::V5, 0.4f, 0.45f);
+            infer->classifier = classify::load(classify_path, classify::Type::densenet121);
+            if (!infer->yolo || !infer->armor_yolo || !infer->classifier) {
+                WUST_ERROR("detect_init") << "Load infer failed!"
+                                          << "index:" << i;
+                continue;
+            }
+            infers.push_back(std::move(infer));
+            size_t free_mem, total_mem;
+            cudaMemGetInfo(&free_mem, &total_mem);
+            WUST_DEBUG("detect_init") << "Free GPU memory:" << free_mem / 1024.0 / 1024.0 << "MB"
+                                      << "Total GPU memory:" << total_mem / 1024.0 / 1024.0 << "MB";
+            double free_mem_ratio = static_cast<double>(free_mem) / static_cast<double>(total_mem);
+            if (free_mem_ratio < min_free_mem_ratio_) {
+                WUST_WARN("detect_init") << "GPU memory is not enough!"
+                                         << "Free GPU memory:" << free_mem_ratio * 100 << "%";
+                WUST_INFO("detect_init") << "Cut remaining infer";
+                break;
+            }
+            WUST_MAIN("detect_init") << "Load infer success!"
+                                     << "index:" << i;
+        }
+        return infers;
+    };
+    auto release_func = [](std::unique_ptr<Inf>& resource) {
+        if (resource) {
+        }
+    };
+    auto restore_func = [=](size_t idx) -> std::unique_ptr<Inf> {
         auto infer = std::make_unique<Inf>();
         infer->yolo = yolo::load(yolo_path, yolo::Type::V5, 0.6f, 0.45f);
         infer->armor_yolo = yolo::load(armor_path, yolo::Type::V5, 0.4f, 0.45f);
         infer->classifier = classify::load(classify_path, classify::Type::densenet121);
-        if (!infer->yolo || !infer->armor_yolo || !infer->classifier) {
-            WUST_ERROR("detect_init") << "Load infer failed!"
-                                      << "index:" << i;
-            //infer_status_[i].store(true);
-            continue;
-        }
-        infers.push_back(std::move(infer));
-        size_t free_mem, total_mem;
-        cudaMemGetInfo(&free_mem, &total_mem);
-        WUST_DEBUG("detect_init") << "Free GPU memory:" << free_mem / 1024.0 / 1024.0 << "MB"
-                                  << "Total GPU memory:" << total_mem / 1024.0 / 1024.0 << "MB";
-        double free_mem_ratio = static_cast<double>(free_mem) / static_cast<double>(total_mem);
-        if (free_mem_ratio < min_free_mem_ratio_) {
-            WUST_WARN("detect_init") << "GPU memory is not enough!"
-                                     << "Free GPU memory:" << free_mem_ratio * 100 << "%";
-            WUST_INFO("detect_init") << "Cut remaining infer";
-            break;
-        }
-        WUST_MAIN("detect_init") << "Load infer success!"
-                                 << "index:" << i;
-    }
-    infer_status_.reserve(infers.size());
-    for (size_t i = 0; i < infers.size(); ++i) {
-        infer_status_.emplace_back(false);
-    }
-    for (size_t i = 0; i < infers.size(); ++i) {
-        infer_released_.emplace_back(false);
-    }
-    WUST_MAIN("detect_init") << "Load infers:" << infers.size() << " success!";
 
-    thread_pool_ = std::make_unique<ThreadPool>(std::thread::hardware_concurrency() * 2);
+        if (!infer->yolo || !infer->armor_yolo || !infer->classifier) {
+            WUST_ERROR("restore_func") << "Restore infer failed at index " << idx;
+            return nullptr;
+        }
+        WUST_INFO("restore_func") << "Restore infer success at index " << idx;
+        return infer;
+    };
+    pool_params.restore_func = restore_func;
+
+    pool_params.release_func = release_func;
+
+    pool_params.can_restore = [=](size_t active_count) {
+        size_t free_mem = 0, total_mem = 0;
+        cudaMemGetInfo(&free_mem, &total_mem);
+
+        double free_ratio = static_cast<double>(free_mem) / total_mem;
+        size_t used_mem = total_mem - free_mem;
+        size_t avg_used_per_resource = active_count > 0 ? used_mem / active_count : 1;
+        size_t safe_margin = avg_used_per_resource ;
+
+        bool enough_for_one_more = free_mem > (avg_used_per_resource + safe_margin);
+
+        return free_ratio > min_free_mem_ratio_*1.2 && enough_for_one_more;
+    };
+
+    pool_params.should_release = [=](size_t active_count) {
+        size_t free_mem = 0, total_mem = 0;
+        cudaMemGetInfo(&free_mem, &total_mem);
+        double free_ratio = static_cast<double>(free_mem) / total_mem;
+        return free_ratio < min_free_mem_ratio_ && active_count > 1;
+    };
+    thread_pool_ = std::make_shared<ThreadPool>(max_infer_threads_);
+    pool_params.thread_pool = thread_pool_;
+    pool_params.logger = [](const std::string& msg) { WUST_INFO("infers pool") << msg; };
+    resource_pool_ = std::make_unique<AdaptiveResourcePool<Inf>>(pool_params);
     detect_finish_count_ = 0;
 }
 int getColor(cv::Mat& img) {
@@ -225,11 +266,7 @@ cv::Mat resizeNoPadding(const cv::Mat& img, int target_size = 224) {
     return output;
 }
 
-std::vector<Car> Detect::detect(
-    const CommonFrame& frame,
-    const std::unique_ptr<Inf>& infer,
-    DetectDebug& detect_debug
-) {
+std::vector<Car> Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_debug) {
     cv::Mat img = frame.image_L;
 
     if (img.empty()) {
@@ -407,92 +444,13 @@ std::vector<Car> Detect::detect(
 }
 
 void Detect::pushInput(const CommonFrame& frame) {
-    size_t free_mem = 0, total_mem = 0;
-    cudaMemGetInfo(&free_mem, &total_mem);
-    size_t used_mem = total_mem - free_mem;
-
-    int ctx_num = std::count(infer_released_.begin(), infer_released_.end(), false);
-    double used_ratio = (double)used_mem / total_mem;
-    double extra_margin = used_ratio * ctx_num * 0.1;
-
-    double free_mem_ratio = static_cast<double>(free_mem) / total_mem;
-
-    if (free_mem_ratio >= min_free_mem_ratio_ + extra_margin) {
-        for (size_t i = 0; i < infers.size(); ++i) {
-            if (infer_released_[i]) {
-                infers[i] = std::make_unique<Inf>(); 
-                infers[i]->yolo = yolo::load(yolo_path, yolo::Type::V5, 0.6f, 0.45f);
-                infers[i]->armor_yolo = yolo::load(armor_path, yolo::Type::V5, 0.4f, 0.45f);
-                infers[i]->classifier = classify::load(classify_path, classify::Type::densenet121);
-                if (infers[i] && infers[i]->yolo && infers[i]->armor_yolo && infers[i]->classifier) {
-                    infer_released_[i] = false;
-                    infer_status_[i].store(false);
-                    WUST_INFO("pushInput") << "Restored infer index: " << i;
-                } else {
-                    std::cerr << "Failed to restore infer[" << i << "]\n";
-                }
-            }
-        }
-    }
-
-    for (size_t i = 0; i < infer_status_.size(); ++i) {
-        if (!infer_status_[i].load() && !infer_released_[i]) {
-            if (free_mem_ratio < min_free_mem_ratio_) {
-                WUST_WARN("pushInput") << "GPU memory is not enough!"
-                                       << "Free GPU memory:" << free_mem_ratio * 100 << "%";
-
-                // 至少保留一个可用 infers
-                size_t active_count = 0;
-                for (bool released : infer_released_) {
-                    if (!released) ++active_count;
-                }
-
-                for (size_t j = i; j < infer_status_.size(); ++j) {
-                    if (!infer_status_[j].load() && !infer_released_[j]) {
-                        if (active_count <= 1) {
-                            break;  // 不再释放，至少保留一个
-                        }
-
-                        infer_status_[j].store(true);
-                        infers[j].reset();  // 释放资源
-                        infer_released_[j] = true;
-                        WUST_INFO("pushInput")
-                            << "Cut infer index:" << j << " due to low GPU memory";
-                        break;
-                    }
-                }
-                break;
-            }
-
-            infer_status_[i].store(true);
-
-            thread_pool_->enqueue([this, i, frame]() {
-                try {
-                    if (!infers[i]) {
-                        std::cerr << "Fatal: infers[" << i << "] is nullptr\n";
-                        infer_status_[i].store(false);
-                        return;
-                    }
-                    if (!infers[i]->yolo || !infers[i]->armor_yolo || !infers[i]->classifier) {
-                        std::cerr << "Fatal: infers[" << i << "] contains nullptr components\n";
-                        infer_status_[i].store(false);
-                        return;
-                    }
-
-                    DetectDebug detect_debug;
-                    auto cars = this->detect(frame, infers[i], detect_debug);
-                    if (callback_) {
-                        callback_(frame, cars, detect_debug);
-                    }
-
-                } catch (const std::exception& e) {
-                    std::cerr << "Error in detect: " << e.what() << std::endl;
-                }
-                infer_status_[i].store(false);
-                detect_finish_count_++;
-            });
-
-            return;
-        }
+    if (resource_pool_) {
+        resource_pool_->enqueue([=](Inf& infer) {
+            DetectDebug detect_debug;
+            auto result = detect(frame, &infer, detect_debug);
+            if (callback_)
+                callback_(frame, result, detect_debug);
+            detect_finish_count_++;
+        });
     }
 }

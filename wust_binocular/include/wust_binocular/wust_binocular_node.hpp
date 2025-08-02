@@ -6,6 +6,7 @@
 #include "wust_binocular/stereo_depth_estimator.hpp"
 #include "wust_utils/ThreadPool.h"
 #include <wust_utils/logger.hpp>
+#include <wust_utils/timer.hpp>
 #include <yaml-cpp/yaml.h>
 using FrameCallback = std::function<void(ImageFrame&, bool)>;
 class SingleCamera {
@@ -175,14 +176,12 @@ private:
     void initLog();
     void loadCommonParams();
     void frameCallback(const CommonFrame& frame);
-    void timerCallback();
+    void timerCallback(double dt_ms);
     void detectCallback(
         const CommonFrame& frame,
         const std::vector<Car>& cars,
         DetectDebug& detect_debug
     );
-    void stopTimer();
-    void startTimer();
     void printStats();
     bool is_inited_ = false;
     bool use_binocular_ = false;
@@ -193,18 +192,18 @@ private:
     std::unique_ptr<SingleCamera> camera_R_;
     std::unique_ptr<SingleCamera> camera_L_;
     std::unique_ptr<ThreadPool> thread_pool_;
-    rclcpp::TimerBase::SharedPtr timer_;
     double max_time_diff_ms_;
     size_t passed_count_ = 0;
     std::chrono::steady_clock::time_point last_stat_time_steady_;
     int fps_;
     std::mutex callback_mutex_;
     std::atomic<int> infer_running_count_ { 0 };
-    std::atomic<bool> timer_running_ { false };
-    std::thread timer_thread_;
+    // std::atomic<bool> timer_running_ { false };
+    // std::thread timer_thread_;
+    std::unique_ptr<Timer> timer_;
     int timer_count_ = 0;
-    std::mutex timer_mtx_;
-    std::condition_variable timer_cv_;
+    // std::mutex timer_mtx_;
+    // std::condition_variable timer_cv_;
     double max_delay_;
     uint64_t seq_id_R_ = 0;
     uint64_t seq_id_L_ = 0;

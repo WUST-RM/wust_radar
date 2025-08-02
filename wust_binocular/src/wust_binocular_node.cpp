@@ -49,7 +49,8 @@ WustBinocularNode::WustBinocularNode(const rclcpp::NodeOptions& options):
         );
     }
     if (use_trigger_) {
-        startTimer();
+        //startTimer();
+        timer_ = std::make_unique<Timer>();
     }
     if (camera_L_)
         camera_L_->start();
@@ -60,6 +61,12 @@ WustBinocularNode::WustBinocularNode(const rclcpp::NodeOptions& options):
     seq_reset_R_ = true;
     seq_reset_L_ = true;
     is_inited_ = true;
+    if (timer_) {
+        auto timercallback =
+            std::bind(&WustBinocularNode::timerCallback, this, std::placeholders::_1);
+        double rate_hz = static_cast<double>(fps_);
+        timer_->start(rate_hz, timercallback);
+    }
 }
 void WustBinocularNode::loadCommonParams() {
     this->declare_parameter<double>("common.max_delay", 1.0);
@@ -91,8 +98,8 @@ void WustBinocularNode::initLog() {
     initLogger(log_level, log_path, use_logcli, use_logfile, use_simplelog);
 }
 WustBinocularNode::~WustBinocularNode() {
-    if (use_trigger_) {
-        stopTimer();
+    if (timer_) {
+        timer_->stop();
     }
 }
 void WustBinocularNode::frameCallback(const CommonFrame& frame) {
@@ -122,36 +129,6 @@ void WustBinocularNode::frameCallback(const CommonFrame& frame) {
         detect_->pushInput(frame);
     }
 }
-float getAverageCenterDepth(const cv::Mat& depth_map, int window_size = 5) {
-    if (depth_map.empty())
-        return -1.0f;
-
-    int cx = depth_map.cols / 2;
-    int cy = depth_map.rows / 2;
-    int half = window_size / 2;
-
-    cv::Rect roi(cx - half, cy - half, window_size, window_size);
-    roi &= cv::Rect(0, 0, depth_map.cols, depth_map.rows);
-
-    cv::Mat patch = depth_map(roi);
-
-    double sum = 0.0;
-    int count = 0;
-    for (int y = 0; y < patch.rows; ++y) {
-        for (int x = 0; x < patch.cols; ++x) {
-            float val = patch.at<float>(y, x);
-            if (val > 0 && val < 10000) { // 根据你的深度范围调整阈值
-                sum += val;
-                count++;
-            }
-        }
-    }
-
-    if (count == 0)
-        return -1.0f; // 没有有效深度
-
-    return static_cast<float>(sum / count);
-}
 
 void WustBinocularNode::detectCallback(
     const CommonFrame& frame,
@@ -159,73 +136,16 @@ void WustBinocularNode::detectCallback(
     DetectDebug& detect_debug
 ) {
     if (depth_estimator_) {
-        thread_pool_->enqueue(
-            [this, frame, cars]() {
-                for (auto& car: cars) {
-                    auto depth = depth_estimator_->computeDepth(frame, car.car_rect);
-                    auto depth_value = getAverageCenterDepth(depth);
-                    std::cout << depth_value << std::endl;
-                }
-            },
-            -1
-        );
     }
     showDebug(detect_debug);
 }
-void WustBinocularNode::timerCallback() {
+void WustBinocularNode::timerCallback(double dt_ms) {
     if (camera_L_)
         camera_L_->trigger();
     if (camera_R_)
         camera_R_->trigger();
 }
-void WustBinocularNode::stopTimer() {
-    {
-        std::lock_guard<std::mutex> lk(timer_mtx_);
-        timer_running_ = false;
-    }
-    timer_cv_.notify_one();
-    if (timer_thread_.joinable()) {
-        timer_thread_.join();
-    }
-}
-void WustBinocularNode::startTimer() {
-    if (timer_running_)
-        return;
-    WUST_INFO("startTimer") << "starting timer";
 
-    timer_running_ = true;
-
-    double us_interval = 1e6 / static_cast<double>(fps_);
-    auto interval = std::chrono::microseconds(static_cast<int64_t>(us_interval));
-
-    constexpr auto spin_margin = std::chrono::microseconds(200);
-
-    timer_thread_ = std::thread([this, interval, spin_margin]() {
-        auto next_time = std::chrono::steady_clock::now() + interval;
-        auto last_time = std::chrono::steady_clock::now();
-
-        while (true) {
-            {
-                std::unique_lock<std::mutex> lk(timer_mtx_);
-                auto sleep_until = next_time - spin_margin;
-                timer_cv_.wait_until(lk, sleep_until, [this]() { return !timer_running_; });
-                if (!timer_running_)
-                    break;
-            }
-
-            while (std::chrono::steady_clock::now() < next_time) {
-                // busy‐wait
-            }
-
-            auto now = std::chrono::steady_clock::now();
-            double dt_ms = std::chrono::duration<double, std::milli>(now - last_time).count();
-            last_time = now;
-
-            this->timerCallback();
-            next_time += interval;
-        }
-    });
-}
 void WustBinocularNode::printStats() {
     static int timer_check_count = 0;
     using namespace std::chrono;
@@ -243,9 +163,13 @@ void WustBinocularNode::printStats() {
             timer_check_count++;
         }
         if (timer_check_count > 5 && use_trigger_) {
-            stopTimer();
-            startTimer();
             timer_check_count = 0;
+            if (timer_) {
+                auto timercallback =
+                    std::bind(&WustBinocularNode::timerCallback, this, std::placeholders::_1);
+                double rate_hz = static_cast<double>(fps_);
+                timer_->start(rate_hz, timercallback);
+            }
         }
         WUST_INFO("printStats") << "tc: " << timer_count_ << " ,pass: " << passed_count_
                                 << " , det: " << detect_->detect_finish_count_;
