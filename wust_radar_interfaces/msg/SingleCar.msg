@@ -1,0 +1,3 @@
+wust_radar_interfaces/Armor[] armors
+wust_radar_interfaces/Box car_box
+float32 confidence

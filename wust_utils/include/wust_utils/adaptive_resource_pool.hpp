@@ -6,11 +6,12 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 struct MovableAtomicBool {
     std::atomic<bool> v;
-    explicit MovableAtomicBool(bool b = false) noexcept: v(b) {}
+    explicit MovableAtomicBool(bool b = false) noexcept : v(b) {}
     bool load(std::memory_order m = std::memory_order_seq_cst) const noexcept {
         return v.load(m);
     }
@@ -18,10 +19,10 @@ struct MovableAtomicBool {
         v.store(b, m);
     }
     bool exchange(bool b, std::memory_order m = std::memory_order_seq_cst) noexcept {
-        return v.exchange(b);
+        return v.exchange(b, m);
     }
 
-    MovableAtomicBool(MovableAtomicBool&& o) noexcept: v(o.v.load(std::memory_order_relaxed)) {}
+    MovableAtomicBool(MovableAtomicBool&& o) noexcept : v(o.v.load(std::memory_order_relaxed)) {}
     MovableAtomicBool& operator=(MovableAtomicBool&& o) noexcept {
         v.store(o.v.load(std::memory_order_relaxed), std::memory_order_relaxed);
         return *this;
@@ -44,7 +45,7 @@ public:
         std::function<void(const std::string&)> logger = [](const std::string&) {};
     };
 
-    explicit AdaptiveResourcePool(const Params& params): params_(params) {
+    explicit AdaptiveResourcePool(const Params& params) : params_(params) {
         resources_ = params.resource_initializer();
         busy_.resize(resources_.size());
         released_.resize(resources_.size(), false);
@@ -65,9 +66,8 @@ public:
         params_.logger("AdaptiveResourcePool destroyed.");
     }
 
-    using TaskFn = std::function<void(T&)>;
-
-    void enqueue(TaskFn task) {
+    template<typename Func>
+    void enqueue(Func&& task) {
         maybeRecover();
 
         for (size_t i = 0; i < resources_.size(); ++i) {
@@ -78,32 +78,61 @@ public:
                 }
 
                 busy_[i].store(true);
-                params_.thread_pool->enqueue([this, i, task]() {
+
+                auto task_wrapper = [this, i, task = std::forward<Func>(task)]() mutable {
                     T* res = resources_[i].get();
                     if (!res) {
                         params_.logger("Resource[" + std::to_string(i) + "] is null");
                         busy_[i].store(false);
                         return;
                     }
-
                     try {
                         task(*res);
                     } catch (const std::exception& e) {
                         params_.logger("Task exception: " + std::string(e.what()));
                     }
-
                     busy_[i].store(false);
-                });
+                };
+
+                params_.thread_pool->enqueue(std::move(task_wrapper));
                 return;
             }
         }
     }
 
-private:
+    // 当前处于活跃（未释放）状态的资源数量
     size_t activeCount() const {
         return std::count(released_.begin(), released_.end(), false);
     }
 
+    // 当前空闲的资源数量（未被占用 + 未释放）
+    size_t idleCount() const {
+        size_t count = 0;
+        for (size_t i = 0; i < resources_.size(); ++i) {
+            if (!busy_[i].load() && !released_[i]) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    // 总资源数量（包含已释放的）
+    size_t capacity() const {
+        return resources_.size();
+    }
+
+    // 当前忙碌资源数量（被占用 + 未释放）
+    size_t busyCount() const {
+        size_t count = 0;
+        for (size_t i = 0; i < resources_.size(); ++i) {
+            if (busy_[i].load() && !released_[i]) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+private:
     void maybeRecover() {
         size_t active = activeCount();
         if (!params_.can_restore || !params_.can_restore(active))

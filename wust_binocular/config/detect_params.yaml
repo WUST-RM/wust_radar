@@ -1,3 +1,0 @@
-yolo_path: /home/hy/wust_radar/src/wust_binocular/model/TensorRT/yolo1280.engine
-armor_path: /home/hy/wust_radar/src/wust_binocular/model/TensorRT/armor_yolo192.engine
-classify_path: /home/hy/wust_radar/src/wust_binocular/model/TensorRT/classify.engine
