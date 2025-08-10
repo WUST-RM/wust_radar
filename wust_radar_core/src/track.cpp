@@ -44,7 +44,10 @@ void Track::predict(double dt) {
     double center_y = box_kf_state[1];
     double width = box_kf_state[2];
     double height = box_kf_state[3];
-
+    v_center_xy.first = box_kf_state[4];
+    v_center_xy.second = box_kf_state[5];
+    v_box_wh.first = box_kf_state[6];
+    v_box_wh.second = box_kf_state[7];
     Box box;
     box.left = center_x - width / 2.0f;
     box.right = center_x + width / 2.0f;
@@ -53,6 +56,7 @@ void Track::predict(double dt) {
 }
 
 void Track::update(const Detection& det) {
+    frame_count_++;
     auto p = det.position;
     pos_measurement = Eigen::Vector3d(p.x(), p.y(), p.z());
     pos_kf->update(pos_measurement);
@@ -76,7 +80,7 @@ void Track::update(const Detection& det) {
     }
 
     int max_count = 0;
-    int most_common_bot_id = -1;
+    int most_common_bot_id = bot_id;
     for (const auto& kv: freq) {
         if (kv.second > max_count) {
             max_count = kv.second;

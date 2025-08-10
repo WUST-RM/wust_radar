@@ -14,7 +14,7 @@ enum class TrackStateEnum { INACTIVE, TENTATIVE, CONFIRMED, LOST };
 
 // 单次检测结果（检测输入）
 struct Detection {
-    int bot_id = 0;
+    int bot_id = -10;
     Box box;
     Eigen::Vector3d position; // 3D位置
     Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
@@ -60,7 +60,8 @@ inline std::vector<Detection> rawCarsToDetections(const RawCars& raw_cars_msg) {
 class Track {
 public:
     int track_id;
-    int bot_id = 0;
+    int bot_id = -10;
+    size_t frame_count_ = 0;
     std::deque<int> bot_id_history_;
     TrackStateEnum state = TrackStateEnum::INACTIVE;
 
@@ -78,6 +79,8 @@ public:
     std::shared_ptr<KalmanFilter3D> pos_kf;
     Eigen::VectorXd box_measurement;
     Eigen::VectorXd box_kf_state;
+    std::pair<double, double> v_center_xy;
+    std::pair<double, double> v_box_wh;
     std::shared_ptr<KalmanFilterBox> box_kf;
     double last_ypd_y = 0;
     double dt;
@@ -95,20 +98,24 @@ public:
     // 更新边界框
     void updateBox(const Box& new_box);
 };
-inline RightCars
-tracksToRightCars(const std::vector<Track>& tracks, const builtin_interfaces::msg::Time& ros_time) {
-    RightCars right_cars_msg;
-    right_cars_msg.ros_time = ros_time;
+inline TrackedCars tracksToTrackedCars(
+    const std::vector<Track>& tracks,
+    const builtin_interfaces::msg::Time& ros_time
+) {
+    TrackedCars tracked_cars_msg;
+    tracked_cars_msg.ros_time = ros_time;
 
     for (const auto& track: tracks) {
         // 只转换活跃或确认的轨迹（根据你实际需要）
         if (track.state == TrackStateEnum::CONFIRMED) {
-            RightCar rc;
+            TrackedCar rc;
             rc.car_class = static_cast<CarClass>(track.bot_id); // 转回CarClass枚举
             rc.uwb_point = track.position;
-            right_cars_msg.right_cars.push_back(rc);
+            rc.uwb_velocity = track.velocity;
+            rc.frame_count = track.frame_count_;
+            tracked_cars_msg.tracked_cars.push_back(rc);
         }
     }
 
-    return right_cars_msg;
+    return tracked_cars_msg;
 }

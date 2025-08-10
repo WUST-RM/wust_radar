@@ -1,7 +1,20 @@
 #pragma once
+
 #include <Eigen/Dense>
 #include <builtin_interfaces/msg/detail/time__struct.hpp>
 #include <opencv2/opencv.hpp>
+enum class FACTION { RAD = 0, BULE = 1 };
+inline std::string FactionToString(FACTION faction) {
+    switch (faction) {
+        case FACTION::RAD:
+            return "RAD";
+        case FACTION::BULE:
+            return "BULE";
+        default:
+            return "UNKNOWN";
+    }
+}
+enum class CarState { ACTIVE, NEEDGUESS, GUESSING };
 enum class CarClass {
     RUNKNOWN = 10,
     R1 = 1,
@@ -15,12 +28,12 @@ enum class CarClass {
     B3 = 103,
     B4 = 104,
     B7 = 107,
+    GUNKNOWN = -10,
     G1 = -1,
     G2 = -2,
     G3 = -3,
     G4 = -4,
-    G7 = -7,
-    GUNKNOWN = 0
+    G7 = -7
 };
 struct Box {
     float left;
@@ -59,13 +72,27 @@ struct RawCars {
     builtin_interfaces::msg::Time ros_time;
 };
 
-struct RightCar {
+struct TrackedCar {
     CarClass car_class;
     Eigen::Vector3d uwb_point;
+    Eigen::Vector3d uwb_velocity;
+    size_t frame_count = 0;
 };
-struct RightCars {
-    std::vector<RightCar> right_cars;
+struct TrackedCars {
+    std::vector<TrackedCar> tracked_cars;
     builtin_interfaces::msg::Time ros_time;
+};
+struct FinalCar {
+    CarClass car_class;
+    Eigen::Vector3d uwb_point;
+    Eigen::Vector3d uwb_velocity;
+    CarState state = CarState::NEEDGUESS;
+    size_t frame_count = 0;
+    std::chrono::steady_clock::time_point timestamp;
+};
+struct FinalCars {
+    std::vector<FinalCar> final_cars;
+    std::chrono::steady_clock::time_point timestamp;
 };
 struct TrackCfg {
     int track_theresh;
@@ -74,4 +101,5 @@ struct TrackCfg {
     double w_iou;
     double w_botid;
     double w_speed;
+    std::string guess_pts_path;
 };

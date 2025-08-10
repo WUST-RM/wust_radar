@@ -11,11 +11,18 @@ inline Eigen::Vector3d cvFrame2world(const Eigen::Vector3d& cv) {
     world = R * cv;
     return world;
 }
-inline Eigen::Vector3d world2uwb(const Eigen::Vector3d& world) {
+inline Eigen::Vector3d world2uwb(const Eigen::Vector3d& world, FACTION faction) {
     Eigen::Vector3d uwb;
-    uwb.x() = world.x() + 14.0;
-    uwb.y() = world.y() + 7.5;
-    uwb.z() = world.z();
+    if (faction == FACTION::RAD) {
+        uwb.x() = world.x() + 14.0;
+        uwb.y() = world.y() + 7.5;
+        uwb.z() = world.z();
+    } else {
+        uwb.x() = 28.0 - (world.x() + 14.0);
+        uwb.y() = 14.0 - (world.y() + 7.5);
+        uwb.z() = world.z();
+    }
+
     return uwb;
 }
 inline bool isUnknown(CarClass car_class) {
@@ -107,7 +114,6 @@ inline std::pair<int, int> carClass2ColorId(CarClass c) {
         case CarClass::R7:
             return { 2, 6 };
 
-        // 绿色
         case CarClass::GUNKNOWN:
             return { 1, 0 };
         case CarClass::G1:

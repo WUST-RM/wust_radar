@@ -206,11 +206,17 @@ void CascadeMatchTracker::update(const std::vector<Detection>& detections) {
     for (int idx: unmatched_tracks) {
         Track& track = *track_ptrs[idx];
         track.miss_count++;
-        Eigen::VectorXd kf_state = track.pos_kf->getState();
-        kf_state(3) *= track_cfg_.v_damping;
-        kf_state(4) *= track_cfg_.v_damping;
-        kf_state(5) *= track_cfg_.v_damping;
-        track.pos_kf->setState(kf_state);
+        Eigen::VectorXd pos_kf_state = track.pos_kf->getState();
+        pos_kf_state(3) *= track_cfg_.v_damping;
+        pos_kf_state(4) *= track_cfg_.v_damping;
+        pos_kf_state(5) *= track_cfg_.v_damping;
+        track.pos_kf->setState(pos_kf_state);
+        Eigen::VectorXd box_kf_state = track.box_kf->getState();
+        box_kf_state(4) *= track_cfg_.v_damping;
+        box_kf_state(5) *= track_cfg_.v_damping;
+        box_kf_state(6) *= track_cfg_.v_damping;
+        box_kf_state(7) *= track_cfg_.v_damping;
+        track.box_kf->setState(box_kf_state);
         if (track.miss_count > max_miss_count_) {
             track.position = predictLostTrackPoint(track);
             track.state = TrackStateEnum::LOST;

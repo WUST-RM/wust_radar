@@ -1,14 +1,17 @@
 wust_radar_core:
   ros__parameters:
     common:
-      camera_info_path: /home/hy/wust_radar/src/wust_radar_core/pnp_result.yaml
-      ply_file: /home/hy/wust_radar/src/wust_radar_core/RMUC2025_National.PLY
+      faction: 0
+      camera_info_path: /home/hy/wust_radar/src/wust_radar_core/config/cal_result.yaml
+      ply_file: /home/hy/wust_radar/src/wust_radar_core/field/RMUC2025_National.PLY
+      field_image: /home/hy/wust_radar/src/wust_radar_core/field/field_image.png
     track:
       max_match_m: 5.0
       max_miss_time: 1.0
       track_theresh: 5
-      v_damping: 0.5
+      v_damping: 0.8
       w_dist: 5.5
       w_iou: 2.0
       w_botid: 7.0
       w_speed: -2.5
+      guess_pts_path: /home/hy/wust_radar/src/wust_radar_core/config/guess_pts.yaml

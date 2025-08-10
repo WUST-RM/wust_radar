@@ -1,5 +1,6 @@
 #pragma once
 #include "rclcpp/rclcpp.hpp"
+#include "wust_radar_core/car_pool.hpp"
 #include "wust_radar_core/cascade_match_tracker.hpp"
 #include "wust_radar_core/pixel_to_world.hpp"
 #include "wust_radar_core/type/type.hpp"
@@ -15,4 +16,6 @@ private:
     std::unique_ptr<PixelToWorld> pixel_to_world_;
     cv::Mat map_;
     std::unique_ptr<CascadeMatchTracker> tracker_;
+    std::unique_ptr<CarPool> car_pool_;
+    FACTION faction_;
 };

@@ -1,5 +1,5 @@
 #include "wust_radar_core/pixel_to_world.hpp"
-
+#include "wust_utils/logger.hpp"
 PixelToWorld::PixelToWorld():
     camera_matrix_(cv::Mat(3, 3, CV_32F, cv::Scalar(0))),
     rotation_matrix_(cv::Mat(3, 3, CV_64F, cv::Scalar(0))),
@@ -10,7 +10,7 @@ bool PixelToWorld::LoadCameraParameters(const std::string& yaml_file) {
 
     auto camera_mat_node = config["camera_matrix"];
     if (!camera_mat_node) {
-        std::cerr << "缺少camera_matrix" << std::endl;
+        WUST_ERROR("LoadCameraParameters") << "缺少camera_matrix";
         return false;
     }
     for (int r = 0; r < 3; r++) {
@@ -21,7 +21,7 @@ bool PixelToWorld::LoadCameraParameters(const std::string& yaml_file) {
 
     auto rot_node = config["rotation_matrix"];
     if (!rot_node) {
-        std::cerr << "缺少rotation_matrix" << std::endl;
+        WUST_ERROR("LoadCameraParameters") << "缺少rotation_matrix";
         return false;
     }
     for (int r = 0; r < 3; r++) {
@@ -32,7 +32,7 @@ bool PixelToWorld::LoadCameraParameters(const std::string& yaml_file) {
 
     auto trans_node = config["translation_vector"];
     if (!trans_node) {
-        std::cerr << "缺少translation_vector" << std::endl;
+        WUST_ERROR("LoadCameraParameters") << "缺少translation_vector";
         return false;
     }
     for (int r = 0; r < 3; r++) {
@@ -68,7 +68,7 @@ bool PixelToWorld::LoadCameraParameters(const std::string& yaml_file) {
 bool PixelToWorld::LoadPLY(const std::string& ply_file) {
     mesh_ = open3d::io::CreateMeshFromFile(ply_file);
     if (!mesh_) {
-        std::cerr << "无法加载PLY文件: " << ply_file << std::endl;
+        WUST_ERROR("LoadCameraParameters") << "无法加载PLY文件: " << ply_file;
         return false;
     }
 
@@ -82,7 +82,7 @@ bool PixelToWorld::LoadPLY(const std::string& ply_file) {
     raycasting_scene_ = std::make_shared<open3d::t::geometry::RaycastingScene>();
     raycasting_scene_->AddTriangles(*scene_);
 
-    std::cout << "PLY网格加载成功, 顶点数: " << mesh_->vertices_.size() << std::endl;
+    WUST_INFO("LoadPLY") << "PLY网格加载成功, 顶点数: " << mesh_->vertices_.size();
     return true;
 }
 

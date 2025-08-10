@@ -1,3 +1,4 @@
+import datetime
 import cv2
 import json
 import os
@@ -63,7 +64,8 @@ def zoom_on_point(img, center, zoom_factor=2.0, size=200):
 
 def main():
     global img_gray, clicked_points, zoom_center, zoom_factor
-    video_path = "/home/hy/data/ENTERPRIZE战队RM2025开源第一视角/7.27-华东理工.mp4"  # ← 修改为你的视频路径
+
+    video_path = "/home/hy/data/ENTERPRIZE战队RM2025开源第一视角/7.27-华东理工.mp4"
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -82,6 +84,8 @@ def main():
     cv2.resizeWindow("Select Frame", 640, 480)
     cv2.createTrackbar("Frame", "Select Frame", 0, total_frames - 1, nothing)
 
+    image_path = None
+    now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     while True:
         frame_id = cv2.getTrackbarPos("Frame", "Select Frame")
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
@@ -93,16 +97,23 @@ def main():
         cv2.imshow("Select Frame", frame)
         key = cv2.waitKey(30) & 0xFF
         if key == ord("s"):
-            image_path = os.path.join(output_dir, f"{frame_id}.jpg")
+
+            image_path = os.path.join(output_dir, f"{now_str}.jpg")
             cv2.imwrite(image_path, frame)
             print(f"[INFO] 已保存帧图像: {image_path}")
             break
         elif key == 27:
             print("[INFO] 用户取消")
+            cap.release()
+            cv2.destroyAllWindows()
             return
 
-    cv2.destroyAllWindows()
     cap.release()
+    cv2.destroyAllWindows()
+
+    if image_path is None:
+        print("[ERROR] 没有保存任何帧，退出")
+        return
 
     img = cv2.imread(image_path)
     img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -147,7 +158,7 @@ def main():
         elif key == ord("-") or key == ord("_"):
             zoom_factor = max(zoom_factor - 0.5, 1.0)
             print(f"[ZOOM] 缩小倍数: {zoom_factor}")
-        elif key in [81, 82, 83, 84]:
+        elif key in [81, 82, 83, 84]:  # 方向键左上右下
             if clicked_points:
                 x, y = clicked_points[-1]
                 step = 0.5
@@ -170,8 +181,9 @@ def main():
 
     cv2.destroyAllWindows()
 
-    json_path = os.path.join(output_dir, f"{frame_id}.json")
+    json_path = os.path.join(output_dir, f"{now_str}.json")
     save_points_to_json(clicked_points, json_path)
+    print(f"[INFO] 已保存标注点到: {json_path}")
 
 
 if __name__ == "__main__":

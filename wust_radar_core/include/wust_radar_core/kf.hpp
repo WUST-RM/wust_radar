@@ -144,7 +144,17 @@ public:
         F_(2, 6) = dt_;
         F_(3, 7) = dt_;
     }
+    Eigen::VectorXd getState() const {
+        return x_;
+    }
 
+    void setState(const Eigen::VectorXd& new_x) {
+        if (new_x.size() == x_.size()) {
+            x_ = new_x;
+        } else {
+            std::cerr << "Error: new state vector size mismatch." << std::endl;
+        }
+    }
     Eigen::Vector4d predict() {
         x_ = F_ * x_;
         P_ = F_ * P_ * F_.transpose() + Q_;
