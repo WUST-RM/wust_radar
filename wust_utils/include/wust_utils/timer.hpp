@@ -159,9 +159,8 @@ inline std::string currentSystemTimeStr(const char* format = "%Y-%m-%d %H:%M:%S"
 /// 获取当前时间点（steady_clock）偏移毫秒后的字符串（相对格式）
 inline std::string offsetTimePointStr(const TimePoint& base, const char* label = "ΔT") {
     std::ostringstream oss;
-    oss << label << ": +" << std::fixed << std::setprecision(3)
-        << elapsedMs(base) << " ms";
+    oss << label << ": +" << std::fixed << std::setprecision(3) << elapsedMs(base) << " ms";
     return oss.str();
 }
 
-}  // namespace time_utils
+} // namespace time_utils

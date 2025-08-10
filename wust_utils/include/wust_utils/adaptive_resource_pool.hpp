@@ -1,17 +1,17 @@
 #pragma once
 
-#include "wust_utils/ThreadPool.h"
 #include <algorithm>
 #include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 struct MovableAtomicBool {
     std::atomic<bool> v;
-    explicit MovableAtomicBool(bool b = false) noexcept : v(b) {}
+    explicit MovableAtomicBool(bool b = false) noexcept: v(b) {}
     bool load(std::memory_order m = std::memory_order_seq_cst) const noexcept {
         return v.load(m);
     }
@@ -22,7 +22,7 @@ struct MovableAtomicBool {
         return v.exchange(b, m);
     }
 
-    MovableAtomicBool(MovableAtomicBool&& o) noexcept : v(o.v.load(std::memory_order_relaxed)) {}
+    MovableAtomicBool(MovableAtomicBool&& o) noexcept: v(o.v.load(std::memory_order_relaxed)) {}
     MovableAtomicBool& operator=(MovableAtomicBool&& o) noexcept {
         v.store(o.v.load(std::memory_order_relaxed), std::memory_order_relaxed);
         return *this;
@@ -41,11 +41,10 @@ public:
         std::function<bool(size_t)> should_release;
         std::function<std::unique_ptr<T>(size_t)> restore_func;
         std::function<void(std::unique_ptr<T>&)> release_func;
-        std::shared_ptr<ThreadPool> thread_pool;
         std::function<void(const std::string&)> logger = [](const std::string&) {};
     };
 
-    explicit AdaptiveResourcePool(const Params& params) : params_(params) {
+    explicit AdaptiveResourcePool(const Params& params): params_(params) {
         resources_ = params.resource_initializer();
         busy_.resize(resources_.size());
         released_.resize(resources_.size(), false);
@@ -66,8 +65,9 @@ public:
         params_.logger("AdaptiveResourcePool destroyed.");
     }
 
-    template<typename Func>
-    void enqueue(Func&& task) {
+    /// 获取一个可用资源指针（可能返回 nullptr）
+    T* acquire() {
+        std::lock_guard<std::mutex> lk(mutex_);
         maybeRecover();
 
         for (size_t i = 0; i < resources_.size(); ++i) {
@@ -76,37 +76,26 @@ public:
                     maybeReleaseOne(i);
                     break;
                 }
-
                 busy_[i].store(true);
+                return resources_[i].get();
+            }
+        }
+        return nullptr;
+    }
 
-                auto task_wrapper = [this, i, task = std::forward<Func>(task)]() mutable {
-                    T* res = resources_[i].get();
-                    if (!res) {
-                        params_.logger("Resource[" + std::to_string(i) + "] is null");
-                        busy_[i].store(false);
-                        return;
-                    }
-                    try {
-                        task(*res);
-                    } catch (const std::exception& e) {
-                        params_.logger("Task exception: " + std::string(e.what()));
-                    }
-                    busy_[i].store(false);
-                };
-
-                params_.thread_pool->enqueue(std::move(task_wrapper));
+    /// 归还一个资源
+    void release(T* res_ptr) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        for (size_t i = 0; i < resources_.size(); ++i) {
+            if (resources_[i].get() == res_ptr) {
+                busy_[i].store(false);
                 return;
             }
         }
+        params_.logger("Tried to release unknown resource.");
     }
-
-    // 当前处于活跃（未释放）状态的资源数量
-    size_t activeCount() const {
-        return std::count(released_.begin(), released_.end(), false);
-    }
-
-    // 当前空闲的资源数量（未被占用 + 未释放）
     size_t idleCount() const {
+        std::lock_guard<std::mutex> lk(mutex_);
         size_t count = 0;
         for (size_t i = 0; i < resources_.size(); ++i) {
             if (!busy_[i].load() && !released_[i]) {
@@ -116,23 +105,11 @@ public:
         return count;
     }
 
-    // 总资源数量（包含已释放的）
-    size_t capacity() const {
-        return resources_.size();
-    }
-
-    // 当前忙碌资源数量（被占用 + 未释放）
-    size_t busyCount() const {
-        size_t count = 0;
-        for (size_t i = 0; i < resources_.size(); ++i) {
-            if (busy_[i].load() && !released_[i]) {
-                ++count;
-            }
-        }
-        return count;
-    }
-
 private:
+    size_t activeCount() const {
+        return std::count(released_.begin(), released_.end(), false);
+    }
+
     void maybeRecover() {
         size_t active = activeCount();
         if (!params_.can_restore || !params_.can_restore(active))
@@ -159,7 +136,6 @@ private:
             if (!busy_[i].load() && !released_[i]) {
                 if (active <= 1)
                     break;
-
                 busy_[i].store(true);
                 params_.release_func(resources_[i]);
                 resources_[i].reset();
@@ -175,4 +151,5 @@ private:
     std::vector<std::unique_ptr<T>> resources_;
     std::vector<MovableAtomicBool> busy_;
     std::vector<bool> released_;
+    mutable std::mutex mutex_;
 };

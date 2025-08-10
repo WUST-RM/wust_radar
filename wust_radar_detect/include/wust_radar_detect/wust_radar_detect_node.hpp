@@ -18,11 +18,7 @@ private:
     void loadCommonParams();
     void frameCallback(const ImageFrame& f, bool use_video);
     void timerCallback(double dt_ms);
-    void detectCallback(
-        const CommonFrame& frame,
-        const Cars& cars,
-        DetectDebug& detect_debug
-    );
+    void detectCallback(const CommonFrame& frame, const Cars& cars, DetectDebug& detect_debug);
     void printStats();
     bool is_inited_ = false;
     bool use_binocular_ = false;

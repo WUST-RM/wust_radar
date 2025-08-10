@@ -7,8 +7,7 @@
 #include "wust_utils/adaptive_resource_pool.hpp"
 #include "yolos.hpp"
 #include <memory>
-using DetectCallback =
-    std::function<void(const CommonFrame&, const Cars&, DetectDebug&)>;
+using DetectCallback = std::function<void(const CommonFrame&, const Cars&, DetectDebug&)>;
 struct Inf {
     std::shared_ptr<yolo::Infer> yolo;
     std::shared_ptr<yolo::Infer> armor_yolo;

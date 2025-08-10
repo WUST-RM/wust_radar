@@ -148,8 +148,7 @@ Detect::Detect(const DetectConfig& cfg) {
             WUST_MAIN("detect_init") << "Load infer success!"
                                      << "index:" << i;
         }
-        if(infers.empty())
-        {
+        if (infers.empty()) {
             WUST_ERROR("detect_init") << "No infer can be loaded!";
             std::exit(EXIT_FAILURE);
         }
@@ -197,7 +196,7 @@ Detect::Detect(const DetectConfig& cfg) {
         return free_ratio < min_free_mem_ratio_ && active_count > 1;
     };
     thread_pool_ = std::make_shared<ThreadPool>(max_infer_threads_);
-    pool_params.thread_pool = thread_pool_;
+    //pool_params.thread_pool = thread_pool_;
     pool_params.logger = [](const std::string& msg) { WUST_INFO("infers pool") << msg; };
     resource_pool_ = std::make_unique<AdaptiveResourcePool<Inf>>(pool_params);
     detect_finish_count_ = 0;
@@ -302,12 +301,12 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
     std::vector<yolo::Image> images;
     std::vector<cv::Mat> car_imgs;
     Cars cars;
-    cars.timestamp=frame.timestamp;
+    cars.timestamp = frame.timestamp;
     for (auto& box: result) {
         if (box.class_label == 0 || box.class_label == 1) {
             Car car;
             car.car = box;
-            
+
             cars.cars.push_back(car);
         }
     }
@@ -466,11 +465,20 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
 
 void Detect::pushInput(const CommonFrame& frame) {
     if (resource_pool_) {
-        resource_pool_->enqueue([this, frame = std::move(frame)](Inf& infer) {
+        // resource_pool_->enqueue([this, frame = std::move(frame)](Inf& infer) {
+        //     DetectDebug detect_debug;
+        //     auto result = this->detect(frame, &infer, detect_debug);
+        //     if (callback_)
+        //         this->callback_(frame, result, detect_debug);
+        //     detect_finish_count_++;
+        // });
+        auto infer_ptr = resource_pool_->acquire();
+        thread_pool_->enqueue([this, frame = std::move(frame), infer_ptr]() {
             DetectDebug detect_debug;
-            auto result = this->detect(frame, &infer, detect_debug);
+            auto result = this->detect(frame, infer_ptr, detect_debug);
             if (callback_)
                 this->callback_(frame, result, detect_debug);
+            resource_pool_->release(infer_ptr);
             detect_finish_count_++;
         });
     }

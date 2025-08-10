@@ -80,7 +80,7 @@ void WustRadarDetectNode::frameCallback(const ImageFrame& f, bool use_video) {
     if (detect_ && detect_->resource_pool_->idleCount() == 0) {
         return;
     }
-    
+
     cv::Mat img;
     if (use_video) {
         //img = convertToMatrgb(f);
@@ -91,7 +91,7 @@ void WustRadarDetectNode::frameCallback(const ImageFrame& f, bool use_video) {
     } else {
         img = convertToMatbgr(f);
     }
-    
+
     CommonFrame frame;
     frame.image = std::move(img);
     frame.timestamp = f.timestamp;
@@ -133,7 +133,8 @@ void WustRadarDetectNode::detectCallback(
     }
     auto now = std::chrono::steady_clock::now();
     double delay_ms = time_utils::durationMs(frame.timestamp, now);
-    rclcpp::Duration delay_ros = rclcpp::Duration::from_nanoseconds(static_cast<int64_t>(delay_ms * 1'000'000));
+    rclcpp::Duration delay_ros =
+        rclcpp::Duration::from_nanoseconds(static_cast<int64_t>(delay_ms * 1'000'000));
     msg.header.stamp = this->now() - delay_ros;
     msg.header.frame_id = "camera";
     result_pub_->publish(msg);

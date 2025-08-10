@@ -263,4 +263,3 @@ inline void initLogger(
 #define WUST_INFO(node) LoggerStream(LogLevel::INFO, node, __FILE__, __LINE__)
 #define WUST_WARN(node) LoggerStream(LogLevel::WARN, node, __FILE__, __LINE__)
 #define WUST_ERROR(node) LoggerStream(LogLevel::ERROR, node, __FILE__, __LINE__)
-

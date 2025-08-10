@@ -16,7 +16,6 @@
 
 #pragma once
 
-
 #include "wust_utils/logger.hpp"
 #include <Eigen/Dense>
 #include <opencv2/calib3d.hpp>
@@ -92,7 +91,6 @@ inline Eigen::MatrixXd cvToEigen(const cv::Mat& cv_mat) noexcept {
     return eigen_mat;
 }
 
-
 inline double getNoiseFromCameraYaw(double camera_yaw_deg, double r_front, double r_side) {
     double yaw_rad = camera_yaw_deg * M_PI / 180.0;
     double cos2 = std::cos(yaw_rad);
@@ -165,8 +163,6 @@ inline Eigen::Matrix3d getRGimbalToOdom(
     Eigen::Matrix3d R_gimbal2odom = T_gimbal_to_odom.block<3, 3>(0, 0);
     return R_gimbal2odom;
 }
-
-
 
 inline void changeFileOwner(const std::string& filepath, const std::string& username) {
     struct passwd* pwd = getpwnam(username.c_str());

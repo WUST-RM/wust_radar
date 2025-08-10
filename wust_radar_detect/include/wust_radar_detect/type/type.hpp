@@ -17,9 +17,8 @@ public:
     cv::Rect center_rect;
     int number = 0;
     int color = 1;
-    
 };
-struct Cars{
+struct Cars {
     std::chrono::steady_clock::time_point timestamp;
     std::vector<Car> cars;
 };
@@ -27,4 +26,3 @@ struct imgframe {
     cv::Mat img;
     std::chrono::steady_clock::time_point timestamp;
 };
-
