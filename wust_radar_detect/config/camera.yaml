@@ -11,16 +11,8 @@ camera:
   reverse_x: false
   reverse_y: false
   recorder: true
-  use_high_priority: false
-  high_priority_cpu_id: 3
-  high_priority_cpu_priority: 90
-  use_sched_fifo: true
   video_player:
     fps: 100
-    use_high_priority: true
-    high_priority_cpu_id: 3
-    high_priority_cpu_priority: 90
-    use_sched_fifo: true
     loop: true
     #path: /home/hy/wust_data/video/222.MP4
     #path: /home/hy/wust_data/video/20250726_233351.avi

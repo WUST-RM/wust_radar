@@ -89,7 +89,7 @@ void WustRadarDetectNode::frameCallback(const ImageFrame& f, bool use_video) {
         }
 
     } else {
-        img = convertToMatbgr(f);
+        img = convertToMat(f);
     }
 
     CommonFrame frame;
