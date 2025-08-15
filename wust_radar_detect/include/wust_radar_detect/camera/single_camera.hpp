@@ -28,12 +28,6 @@ public:
             bool loop = camera_config[key]["video_player"]["loop"].as<bool>(false);
             video_player_ =
                 std::make_unique<VideoPlayer>(video_play_path, video_play_fps, start_frame, loop);
-            video_player_->enablehighPriorityAndCpuidPriority(
-                camera_config[key]["video_player"]["use_high_priority"].as<bool>(false),
-                camera_config[key]["video_player"]["high_priority_cpu_id"].as<int>(0),
-                camera_config[key]["video_player"]["high_priority_cpu_priority"].as<int>(0),
-                camera_config[key]["video_player"]["use_sched_fifo"].as<bool>(false)
-            );
             video_player_->setCallback([this](const ImageFrame& frame) {
                 callback_(std::move(frame), use_video_);
             });
@@ -59,12 +53,6 @@ public:
                 camera_config[key]["acquisition_frame_rate_enable"].as<bool>(),
                 camera_config[key]["reverse_x"].as<bool>(false),
                 camera_config[key]["reverse_y"].as<bool>(false)
-            );
-            camera_->enablehighPriorityAndCpuidPriority(
-                camera_config[key]["use_high_priority"].as<bool>(false),
-                camera_config[key]["high_priority_cpu_id"].as<int>(0),
-                camera_config[key]["high_priority_cpu_priority"].as<int>(0),
-                camera_config[key]["use_sched_fifo"].as<bool>(false)
             );
             camera_->setFrameCallback([this](const ImageFrame& frame) {
                 callback_(std::move(frame), use_video_);

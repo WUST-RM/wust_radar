@@ -51,5 +51,4 @@ private:
     std::thread worker_;
     bool trigger_mode_ = false;
     FrameCallback on_frame_callback_;
-
 };
