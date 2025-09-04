@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_BUILD_TYPE "Debug")
 
 # 编译选项
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -32,47 +32,51 @@ find_package(Eigen3      REQUIRED)
 find_package(rclcpp      REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(wust_radar_interfaces REQUIRED)
+find_package(wust_vl REQUIRED)
 
 # 设置 TensorRT 路径并查找库
-set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/home/hy/TensorRT-8.5.2.2")
+set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/home/hy/TensorRT-10.6.0.26")
 find_package(TensorRT REQUIRED)
 
 # 查找 nvonnxparser 动态库
-find_library(NVONNXPARSER_LIB nvonnxparser HINTS /home/hy/TensorRT-8.5.2.2/lib)
+find_library(NVONNXPARSER_LIB nvonnxparser HINTS /home/hy/TensorRT-10.6.0.26/lib)
 if(NOT NVONNXPARSER_LIB)
   message(FATAL_ERROR "libnvonnxparser.so not found")
 endif()
 
 ament_auto_find_build_dependencies()
 
-# YOLO 子目录
-add_subdirectory(yolo)
-include_directories("yolo")
+
+add_subdirectory(infer)
+include_directories(${PROJECT_SOURCE_DIR}/infer/include)
 
 # 添加主库
 ament_auto_add_library(${PROJECT_NAME} SHARED
   DIRECTORY src
 )
 
-# 头文件包含路径
+# 头文件包含路径（采用 scoped include 规范）
 target_include_directories(${PROJECT_NAME} PUBLIC
-  ${PROJECT_SOURCE_DIR}/include
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>          # include/wust_radar_detect 下的头文件
+  $<INSTALL_INTERFACE:include>                              # 安装后走 install/include/wust_radar_detect
+  ${PROJECT_SOURCE_DIR}/infer/include
   ${OpenCV_INCLUDE_DIRS}
   ${HikSDK_INCLUDE_DIR}
   ${EIGEN3_INCLUDE_DIRS}
   ${TensorRT_INCLUDE_DIR}
-  ${PROJECT_SOURCE_DIR}/yolo
+  ${WUST_VL_INCLUDE_DIRS}
 )
 
 # 链接库
 target_link_libraries(${PROJECT_NAME}
   ${OpenCV_LIBS}
   ${HikSDK_LIB}
+  ${WUST_VL_LIBS}
   TensorRT::TensorRT
   CUDA::cudart
   yaml-cpp
-  /home/hy/TensorRT-8.5.2.2/lib/libnvonnxparser.so
-  yolo
+  /home/hy/TensorRT-10.6.0.26/lib/libnvonnxparser.so
+  infer
 )
 
 # 定义宏
@@ -90,4 +94,5 @@ ament_auto_package(
   launch
   config
   model
+  USE_SCOPED_HEADER_INSTALL_DIR 
 )

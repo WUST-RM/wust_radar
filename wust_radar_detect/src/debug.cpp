@@ -8,7 +8,7 @@ void showDebug(const DetectDebug& detect_debug) {
     }
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
-    cv::Mat debug_img = detect_debug.imgframe_->img.clone();
+    cv::Mat debug_img = detect_debug.imgframe_->img;
     //cv::cvtColor(debug_img, debug_img, cv::COLOR_BGR2RGB);
     if (detect_debug.cars) {
         const auto& cars = *detect_debug.cars;

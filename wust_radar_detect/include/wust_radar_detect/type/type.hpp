@@ -1,9 +1,8 @@
 #pragma once
 #include "opencv2/opencv.hpp"
-#include "yolos.hpp"
 #include <chrono>
 #include <functional>
-
+#include "yolos.hpp"
 struct CommonFrame {
     cv::Mat image;
     std::chrono::steady_clock::time_point timestamp;

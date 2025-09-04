@@ -8,8 +8,8 @@ wust_radar_detect:
       use_binocular: false
       use_id_match: false
     detect:
-      max_infer_threads: 3
-      min_free_mem_ratio: 0.4
+      max_infer_threads: 2
+      min_free_mem_ratio: 0.2
       config_path: /home/hy/wust_radar/src/wust_radar_detect/config/detect_params.yaml
     logger:
       log_level: INFO

@@ -23,24 +23,17 @@ WustRadarDetectNode::WustRadarDetectNode(const rclcpp::NodeOptions& options):
         std::placeholders::_3
     ));
     thread_pool_ = std::make_unique<ThreadPool>(std::thread::hardware_concurrency() * 2);
-    initcamera();
-    if (use_trigger_) {
-        timer_ = std::make_unique<Timer>();
-    }
-    if (camera_)
-        camera_->start();
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     result_pub_ = this->create_publisher<wust_radar_interfaces::msg::DetectResult>(
         "detect_result",
         rclcpp::SensorDataQoS()
     );
+    initcamera();
+    if (camera_)
+        camera_->start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    
     is_inited_ = true;
-    if (timer_) {
-        auto timercallback =
-            std::bind(&WustRadarDetectNode::timerCallback, this, std::placeholders::_1);
-        double rate_hz = static_cast<double>(fps_);
-        timer_->start(rate_hz, timercallback);
-    }
+    
 }
 void WustRadarDetectNode::loadCommonParams() {
     this->declare_parameter<double>("common.max_delay", 1.0);
@@ -70,34 +63,22 @@ void WustRadarDetectNode::initLog() {
     initLogger(log_level, log_path, use_logcli, use_logfile, use_simplelog);
 }
 WustRadarDetectNode::~WustRadarDetectNode() {
-    if (timer_) {
-        timer_->stop();
-    }
 }
-void WustRadarDetectNode::frameCallback(const ImageFrame& f, bool use_video) {
+void WustRadarDetectNode::frameCallback(const wust_vl_video::ImageFrame& f) {
     timer_count_++;
     printStats();
     if (detect_ && detect_->resource_pool_->idleCount() == 0) {
         return;
     }
-
-    cv::Mat img;
-    if (use_video) {
-        //img = convertToMatrgb(f);
-        if (!f.src_img.empty()) {
-            img = std::move(f.src_img);
-        }
-
-    } else {
-        img = convertToMat(f);
+    if(f.src_img.empty())
+    {
+        return;
     }
 
     CommonFrame frame;
-    frame.image = std::move(img);
+    frame.image = std::move(f.src_img);
     frame.timestamp = f.timestamp;
     passed_count_++;
-    // auto now = std::chrono::steady_clock::now();
-    // std::cout<<time_utils::durationMs(f.timestamp, now)<<std::endl;
     if (detect_) {
         detect_->pushInput(frame);
     }
@@ -115,7 +96,7 @@ void WustRadarDetectNode::detectCallback(
     const CommonFrame& frame,
     const Cars& cars,
     DetectDebug& detect_debug
-) {
+) { std::lock_guard<std::mutex> lock(callback_mutex_);
     auto msg = wust_radar_interfaces::msg::DetectResult();
     for (auto car: cars.cars) {
         auto msg_car = wust_radar_interfaces::msg::SingleCar();
@@ -140,13 +121,7 @@ void WustRadarDetectNode::detectCallback(
     result_pub_->publish(msg);
     showDebug(detect_debug);
 }
-void WustRadarDetectNode::timerCallback(double dt_ms) {
-    if (camera_)
-        camera_->trigger();
-}
-
 void WustRadarDetectNode::printStats() {
-    static int timer_check_count = 0;
     using namespace std::chrono;
 
     auto now = steady_clock::now();
@@ -158,18 +133,6 @@ void WustRadarDetectNode::printStats() {
 
     auto elapsed = duration_cast<duration<double>>(now - last_stat_time_steady_);
     if (elapsed.count() >= 1.0) {
-        if (timer_count_ < fps_ / 10) {
-            timer_check_count++;
-        }
-        if (timer_check_count > 5 && use_trigger_) {
-            timer_check_count = 0;
-            if (timer_) {
-                auto timercallback =
-                    std::bind(&WustRadarDetectNode::timerCallback, this, std::placeholders::_1);
-                double rate_hz = static_cast<double>(fps_);
-                timer_->start(rate_hz, timercallback);
-            }
-        }
         WUST_INFO("printStats") << "tc: " << timer_count_ << " ,pass: " << passed_count_
                                 << " , det: " << detect_->detect_finish_count_;
         timer_count_ = 0;
@@ -182,18 +145,9 @@ void WustRadarDetectNode::initcamera() {
     this->declare_parameter<std::string>("camera_config_file", "");
     std::string camera_config_file = this->get_parameter("camera_config_file").as_string();
     auto camera_config = YAML::LoadFile(camera_config_file);
-    FrameCallback cb_ = [this](const ImageFrame& f, bool use_video) {
-        if (!is_inited_) {
-            return;
-        }
-
-        thread_pool_->enqueue(
-            [frame = std::move(f), use_video, this]() { this->frameCallback(frame, use_video); },
-            -1
-        );
-    };
-
-    camera_ = std::make_unique<SingleCamera>(camera_config, "camera", cb_, use_trigger_);
+    camera_ = std::make_unique<wust_vl_video::Camera>();
+    camera_->init(camera_config);
+    camera_->setFrameCallback(std::bind(&WustRadarDetectNode::frameCallback, this, std::placeholders::_1));
 }
 
 #include "rclcpp_components/register_node_macro.hpp"

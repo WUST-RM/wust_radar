@@ -5,7 +5,7 @@
 #include <wust_utils/logger.hpp>
 #include <wust_utils/timer.hpp>
 #include <yaml-cpp/yaml.h>
-
+#include "classify.hpp"
 #define MAX_CARS 12
 Detect::~Detect() {
     WUST_INFO("detect") << "Detect destructor called.";
@@ -66,14 +66,13 @@ Detect::Detect(const DetectConfig& cfg) {
     if (!file1.good()) {
         system(
             "python3 /home/hy/wust_radar/src/wust_radar_detect/utils/onnx2trt.py "
-            "--onnx=/home/hy/wust_radar/src/wust_radar_detect/model/ONNX/RM2024.onnx "
-            "--saveEngine=/home/hy/wust_radar/src/wust_radar_detect/model/TensorRT/"
-            "yolo.engine "
-            "--minBatch 1 "
-            "--optBatch 1 "
-            "--maxBatch 2 "
-            "--Shape=960x960 "
-            "--input_name=images"
+               "--onnx=/home/hy/wust_radar/src/wust_radar_detect/model/ONNX/RM2025.onnx "
+               "--saveEngine=/home/hy/wust_radar/src/wust_radar_detect/model/TensorRT/RM2025.engine "
+               "--minBatch 1 "
+               "--optBatch 1 "
+               "--maxBatch 2 "
+               "--Shape=1280x1280 "
+               "--input_name=images"
         );
     } else {
         WUST_INFO("detect_init") << "Load yolo engine!";
@@ -83,14 +82,12 @@ Detect::Detect(const DetectConfig& cfg) {
     if (!file2.good()) {
         system(
             "python3 /home/hy/wust_radar/src/wust_radar_detect/utils/onnx2trt.py "
-            "--onnx=/home/hy/wust_radar/src/wust_radar_detect/model/ONNX/"
-            "armor_yolo.onnx "
-            "--saveEngine=/home/hy/wust_radar/src/wust_radar_detect/model/TensorRT/"
-            "armor_yolo.engine "
+            "--onnx=/home/hy/wust_radar/src/wust_radar_detect/model/ONNX/armor_yolo.onnx "
+            "--saveEngine=/home/hy/wust_radar/src/wust_radar_detect/model/TensorRT/armor_yolo.engine "
             "--minBatch 1 "
             "--optBatch 5 "
             "--maxBatch 12 "
-            "--Shape=96x96 "
+            "--Shape=192x192 "
             "--input_name=images"
         );
     } else {
@@ -101,10 +98,8 @@ Detect::Detect(const DetectConfig& cfg) {
     if (!file3.good()) {
         system(
             "python3 /home/hy/wust_radar/src/wust_radar_detect/utils/onnx2trt.py "
-            "--onnx=/home/hy/wust_radar/src/wust_radar_detect/model/ONNX/"
-            "classify.onnx "
-            "--saveEngine=/home/hy/wust_radar/src/wust_radar_detect/model/TensorRT/"
-            "classify.engine "
+            "--onnx=/home/hy/wust_radar/src/wust_radar_detect/model/ONNX/classify.onnx "
+            "--saveEngine=/home/hy/wust_radar/src/wust_radar_detect/model/TensorRT/classify.engine "
             "--minBatch 1 "
             "--optBatch 10 "
             "--maxBatch 20 "
@@ -125,8 +120,8 @@ Detect::Detect(const DetectConfig& cfg) {
         infers.reserve(max_infer_threads_);
         for (size_t i = 0; i < max_infer_threads_; i++) {
             auto infer = std::make_unique<Inf>();
-            infer->yolo = yolo::load(yolo_path, yolo::Type::V5, 0.6f, 0.45f);
-            infer->armor_yolo = yolo::load(armor_path, yolo::Type::V5, 0.4f, 0.45f);
+            infer->yolo = yolo::load(yolo_path, yolo::Type::V8, 0.6f, 0.45f);
+            infer->armor_yolo = yolo::load(armor_path, yolo::Type::V8, 0.4f, 0.45f);
             infer->classifier = classify::load(classify_path, classify::Type::densenet121);
             if (!infer->yolo || !infer->armor_yolo || !infer->classifier) {
                 WUST_ERROR("detect_init") << "Load infer failed!"
@@ -284,7 +279,7 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
         detect_debug.imgframe_->timestamp = frame.timestamp;
         detect_debug.detect_start.emplace(std::chrono::steady_clock::now());
     }
-    yolo::Image image(img.data, img.cols, img.rows);
+    Image image(img.data, img.cols, img.rows);
     if (!infer->yolo) {
         WUST_ERROR("detect") << "yolo is null";
         return {};
@@ -298,7 +293,7 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
         return {};
     }
 
-    std::vector<yolo::Image> images;
+    std::vector<Image> images;
     std::vector<cv::Mat> car_imgs;
     Cars cars;
     cars.timestamp = frame.timestamp;
@@ -332,7 +327,7 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
         return cars;
     }
     for (auto& car_img: car_imgs) {
-        auto image = yolo::Image(car_img.data, car_img.cols, car_img.rows);
+        auto image = Image(car_img.data, car_img.cols, car_img.rows);
         images.push_back(image);
     }
 
@@ -374,7 +369,7 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
     }
 
     std::vector<cv::Mat> armor_imgs;
-    std::vector<classify::Image> armor_images;
+    std::vector<Image> armor_images;
 
     for (auto& car: cars.cars) {
         if (car.armors.size() == 0) {
@@ -393,7 +388,7 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
         }
     }
     for (auto& armor_img: armor_imgs) {
-        auto image = classify::Image(armor_img.data, armor_img.cols, armor_img.rows);
+        auto image = Image(armor_img.data, armor_img.cols, armor_img.rows);
         armor_images.push_back(image);
     }
     auto armor_result = infer->classifier->forwards(armor_images);
@@ -465,13 +460,6 @@ Cars Detect::detect(const CommonFrame& frame, Inf* infer, DetectDebug& detect_de
 
 void Detect::pushInput(const CommonFrame& frame) {
     if (resource_pool_) {
-        // resource_pool_->enqueue([this, frame = std::move(frame)](Inf& infer) {
-        //     DetectDebug detect_debug;
-        //     auto result = this->detect(frame, &infer, detect_debug);
-        //     if (callback_)
-        //         this->callback_(frame, result, detect_debug);
-        //     detect_finish_count_++;
-        // });
         auto infer_ptr = resource_pool_->acquire();
         thread_pool_->enqueue([this, frame = std::move(frame), infer_ptr]() {
             DetectDebug detect_debug;

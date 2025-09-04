@@ -1,17 +1,20 @@
 #pragma once
 
-#include "classify.hpp"
+
 #include "wust_radar_detect/debug.hpp"
 #include "wust_radar_detect/type/type.hpp"
-#include "wust_utils/ThreadPool.h"
-#include "wust_utils/adaptive_resource_pool.hpp"
+#include "wust_vl/common/concurrency/ThreadPool.h"
+#include "wust_vl/common/concurrency/adaptive_resource_pool.hpp"
 #include "yolos.hpp"
+#include "BaseInfer.hpp"
+#include "NvidiaInterface.hpp"
+#include "classify.hpp"
 #include <memory>
 using DetectCallback = std::function<void(const CommonFrame&, const Cars&, DetectDebug&)>;
 struct Inf {
-    std::shared_ptr<yolo::Infer> yolo;
-    std::shared_ptr<yolo::Infer> armor_yolo;
-    std::shared_ptr<classify::Infer> classifier;
+    std::shared_ptr<Infer<yolo::BoxArray>>     yolo;
+    std::shared_ptr<Infer<yolo::BoxArray>>     armor_yolo;
+    std::shared_ptr<Infer<int>> classifier;
 };
 
 struct DetectConfig {
